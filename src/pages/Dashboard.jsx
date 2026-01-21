@@ -12,8 +12,8 @@ import {
   Calendar,
   Activity,
   CheckCircle,
-  Edit2, // Icono para edición
-  Trash2 // Icono para eliminación
+  MapPin,
+  XCircle
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -36,7 +36,11 @@ export default function Dashboard() {
 
     // 2. Suscribirse a tiempo real
     const subscription = subscribeToActivity((newActivity) => {
-      setActivities(prev => [newActivity, ...prev].slice(0, 5)) // Agregar nuevo y mantener solo 5
+      setActivities(prev => {
+        // Remover si ya existe (para updates) y agregar al inicio
+        const filtered = prev.filter(a => a.id !== newActivity.id)
+        return [newActivity, ...filtered].slice(0, 10)
+      })
     })
 
     // Cleanup al desmontar
@@ -45,9 +49,11 @@ export default function Dashboard() {
     }
   }, [])
 
-  // Función para formatear hora exacta (Ej: 14:30 PM)
+  // Función para formatear hora exacta
   const formatTime = (dateString) => {
+    if (!dateString) return ''
     const date = new Date(dateString)
+    // Ajuste simple de zona horaria si es necesario, o confiar en el browser
     return date.toLocaleTimeString('es-ES', { 
       hour: '2-digit', 
       minute: '2-digit',
@@ -55,24 +61,40 @@ export default function Dashboard() {
     })
   }
 
-  // Función para obtener icono según tipo de actividad
-  const getActivityIcon = (type) => {
-    switch(type) {
-      case 'NEW_EMPLOYEE': return <UserPlus size={20} />
-      case 'UPDATE_EMPLOYEE': return <Edit2 size={20} /> // Nuevo icono
-      case 'DELETE_EMPLOYEE': return <Trash2 size={20} /> // Nuevo icono
-      case 'ATTENDANCE': return <Clock size={20} />
-      default: return <Activity size={20} />
+  // Función para obtener config según tipo de registro
+  const getRecordConfig = (activity) => {
+    // 1. Inasistencias
+    if (activity.record_type === 'AUSENCIA' || activity.record_type === 'INASISTENCIA') {
+      return {
+        icon: <XCircle size={20} />,
+        color: 'text-red-600 bg-red-50',
+        text: 'Reportó Inasistencia',
+        subtext: activity.absence_reason || 'Sin motivo especificado'
+      }
     }
-  }
 
-  // Función para obtener color según tipo de actividad
-  const getActivityColor = (type) => {
-    switch(type) {
-      case 'NEW_EMPLOYEE': return 'text-blue-600 bg-blue-50'
-      case 'UPDATE_EMPLOYEE': return 'text-orange-600 bg-orange-50'
-      case 'DELETE_EMPLOYEE': return 'text-red-600 bg-red-50'
-      default: return 'text-gray-600 bg-gray-50'
+    // 2. Salidas
+    if (activity.check_out && new Date(activity.check_out) > new Date(activity.created_at)) {
+       // Esto es aproximado, idealmente sabríamos si el evento fue check_out
+       // Pero como activity trae todo el registro, asumimos que si check_out es reciente es salida.
+       // Simplificación: Mostramos el estado actual del registro.
+    }
+
+    // 3. Entradas (Default)
+    if (activity.is_late) {
+      return {
+        icon: <Clock size={20} />,
+        color: 'text-orange-600 bg-orange-50',
+        text: 'Marcó Entrada (Tarde)',
+        subtext: 'Registro fuera de horario'
+      }
+    }
+
+    return {
+      icon: <CheckCircle size={20} />,
+      color: 'text-green-600 bg-green-50',
+      text: 'Marcó Entrada (Puntual)',
+      subtext: 'Registro en horario'
     }
   }
 
@@ -198,27 +220,78 @@ export default function Dashboard() {
               ) : activities.length === 0 ? (
                 <div className="text-center py-10 text-gray-400">
                   <CheckCircle className="mx-auto h-10 w-10 text-gray-300 mb-2" />
-                  <p>No hay actividad reciente registrada</p>
+                  <p>No hay registros de asistencia recientes</p>
                 </div>
               ) : (
-                activities.map((act) => (
+                activities.map((act) => {
+                  const config = getRecordConfig(act)
+                  // Detectar ubicación (location_in o location_out)
+                  const location = act.location_in || act.location_out
+                  const hasLocation = location && (typeof location === 'string' ? location.includes('lat') : location.lat)
+                  
+                  return (
                   <div key={act.id} className="flex items-center gap-4 p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-default border-b border-gray-50 last:border-0 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${getActivityColor(act.type)}`}>
-                      {getActivityIcon(act.type)}
+                    {/* Avatar o Icono */}
+                    <div className="relative">
+                       {act.employees?.profile_picture_url ? (
+                         <img 
+                           src={act.employees.profile_picture_url} 
+                           alt={act.employees.full_name} 
+                           className="w-10 h-10 rounded-full object-cover border border-gray-200"
+                         />
+                       ) : (
+                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${config.color}`}>
+                           {config.icon}
+                         </div>
+                       )}
+                       {/* Badge de Estado Pequeño si hay avatar */}
+                       {act.employees?.profile_picture_url && (
+                         <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border-2 border-white ${config.color} text-[10px]`}>
+                           {config.icon}
+                         </div>
+                       )}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">{act.description}</p>
-                      <p className="text-xs text-gray-500">
-                        {act.type === 'NEW_EMPLOYEE' ? 'Registro de Personal' : 
-                         act.type === 'UPDATE_EMPLOYEE' ? 'Actualización de Datos' :
-                         act.type === 'DELETE_EMPLOYEE' ? 'Eliminación de Registro' : 'Sistema'}
-                      </p>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                         <p className="text-sm font-bold text-gray-900 truncate">
+                           {act.employees?.full_name || 'Empleado Desconocido'}
+                         </p>
+                         <span className="text-xs font-medium text-gray-400 whitespace-nowrap bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
+                            {formatTime(act.created_at)}
+                         </span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-gray-600 truncate">
+                          {config.text}
+                        </p>
+                        
+                        {/* Indicador de Ubicación */}
+                        {hasLocation && (
+                          <span 
+                            title="Ubicación registrada" 
+                            className="cursor-pointer text-blue-500 hover:text-blue-700"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                // Aquí podríamos abrir el modal de mapa, pero por ahora solo indicamos visualmente
+                                // O redirigir a la lista de asistencias filtrada
+                                navigate('/attendance')
+                            }}
+                          >
+                            <MapPin size={12} />
+                          </span>
+                        )}
+
+                        {/* Indicador de Validación Pendiente */}
+                        {!act.validated && (act.record_type === 'AUSENCIA' || act.is_late) && (
+                           <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full">
+                             Pendiente
+                           </span>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-xs font-medium text-gray-400 whitespace-nowrap bg-gray-50 px-2 py-1 rounded-md border border-gray-100">
-                      {formatTime(act.created_at)}
-                    </span>
                   </div>
-                ))
+                )})
               )}
             </div>
           </div>

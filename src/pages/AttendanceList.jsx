@@ -1,17 +1,26 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { Calendar, Clock, Filter, Search, CheckCircle, XCircle, AlertCircle, MapPin, X } from 'lucide-react'
+import { Calendar, Clock, Filter, Search, CheckCircle, XCircle, AlertCircle, MapPin, X, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
 export default function AttendanceList() {
     const { user } = useAuth()
     const [attendances, setAttendances] = useState([])
     const [loading, setLoading] = useState(true)
+    const [exporting, setExporting] = useState(false) // Nuevo estado para exportación
     const [selectedLocation, setSelectedLocation] = useState(null)
     const [reasonModal, setReasonModal] = useState(null)
     const [validationModal, setValidationModal] = useState(null)
     const [validationNotes, setValidationNotes] = useState('')
     const [validating, setValidating] = useState(false)
+    
+    // Paginación
+    const [currentPage, setCurrentPage] = useState(1)
+    const [totalPages, setTotalPages] = useState(1)
+    const [totalRecords, setTotalRecords] = useState(0)
+    const PAGE_SIZE = 20
+
     const [filters, setFilters] = useState({
         status: 'all', // all, on_time, late, absent
         dateFrom: '',
@@ -23,12 +32,29 @@ export default function AttendanceList() {
     const hasEmployeeProfile = !!user?.employee_id || !!user?.id;
 
     useEffect(() => {
-        loadAttendances()
+        // Reset page when filters change
+        setCurrentPage(1)
+        loadAttendances(1)
     }, [filters])
 
-    async function loadAttendances() {
+    useEffect(() => {
+        // Load data when page changes (if not first load which is handled above)
+        if (currentPage > 1) {
+            loadAttendances(currentPage)
+        }
+    }, [currentPage])
+
+    async function loadAttendances(page = 1) {
         try {
             setLoading(true)
+            // ... (Rest of logic same as before, calling buildQuery internally if refactored, but here we keep it)
+            
+            // Reusing logic is hard without refactoring, so I will implement a separate buildQuery helper or just copy logic for export
+            // For now, let's keep loadAttendances as is and add export logic separately.
+            
+            // Calcular rango para paginación (0-indexed)
+            const from = (page - 1) * PAGE_SIZE
+            const to = from + PAGE_SIZE - 1
 
             let query = supabase
                 .from('attendance')
@@ -40,42 +66,30 @@ export default function AttendanceList() {
             position,
             sede
           )
-        `)
+        `, { count: 'exact' }) // Solicitar conteo total
                 .order('work_date', { ascending: false })
                 .order('check_in', { ascending: false })
-                .limit(100)
+                .range(from, to)
 
-            // Filtro por estado
+            // Aplicar filtros (Logic duplicated for now, ideal to refactor)
             if (filters.status === 'on_time') {
-                // Puntuales: tienen check_in, no están tarde, y no son ausencias
-                query = query
-                    .not('check_in', 'is', null)
-                    .eq('is_late', false)
-                    .neq('record_type', 'AUSENCIA')
+                query = query.not('check_in', 'is', null).eq('is_late', false).neq('record_type', 'AUSENCIA')
             } else if (filters.status === 'late') {
-                // Tardanzas: tienen check_in y están marcados como tarde
-                query = query
-                    .not('check_in', 'is', null)
-                    .eq('is_late', true)
+                query = query.not('check_in', 'is', null).eq('is_late', true)
             } else if (filters.status === 'absent') {
-                // Ausencias: no tienen check_in O son tipo AUSENCIA
                 query = query.or('check_in.is.null,record_type.eq.AUSENCIA')
             }
 
-            // Filtro por fecha
-            if (filters.dateFrom) {
-                query = query.gte('work_date', filters.dateFrom)
-            }
-            if (filters.dateTo) {
-                query = query.lte('work_date', filters.dateTo)
-            }
+            if (filters.dateFrom) query = query.gte('work_date', filters.dateFrom)
+            if (filters.dateTo) query = query.lte('work_date', filters.dateTo)
 
-            const { data, error } = await query
+            const { data, error, count } = await query
 
             if (error) throw error
 
-            // Filtro por búsqueda (nombre o DNI)
             let filteredData = data || []
+            
+            // Client side search filter
             if (filters.search) {
                 const searchLower = filters.search.toLowerCase()
                 filteredData = filteredData.filter(att =>
@@ -85,11 +99,110 @@ export default function AttendanceList() {
             }
 
             setAttendances(filteredData)
+            
+            if (count !== null) {
+                setTotalRecords(count)
+                setTotalPages(Math.ceil(count / PAGE_SIZE))
+            }
         } catch (error) {
             console.error('Error cargando asistencias:', error)
             alert('Error cargando asistencias: ' + error.message)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const exportToExcel = async () => {
+        try {
+            setExporting(true)
+            
+            // Construir query SIN paginación
+            let query = supabase
+                .from('attendance')
+                .select(`
+                  *,
+                  employees:employee_id (
+                    full_name,
+                    dni,
+                    position,
+                    sede
+                  )
+                `)
+                .order('work_date', { ascending: false })
+                .order('check_in', { ascending: false })
+
+            // Aplicar MISMOS filtros
+            if (filters.status === 'on_time') {
+                query = query.not('check_in', 'is', null).eq('is_late', false).neq('record_type', 'AUSENCIA')
+            } else if (filters.status === 'late') {
+                query = query.not('check_in', 'is', null).eq('is_late', true)
+            } else if (filters.status === 'absent') {
+                query = query.or('check_in.is.null,record_type.eq.AUSENCIA')
+            }
+
+            if (filters.dateFrom) query = query.gte('work_date', filters.dateFrom)
+            if (filters.dateTo) query = query.lte('work_date', filters.dateTo)
+
+            const { data, error } = await query
+            if (error) throw error
+
+            let exportData = data || []
+
+            // Client side search filter (igual que en load)
+            if (filters.search) {
+                const searchLower = filters.search.toLowerCase()
+                exportData = exportData.filter(att =>
+                    att.employees?.full_name?.toLowerCase().includes(searchLower) ||
+                    att.employees?.dni?.includes(searchLower)
+                )
+            }
+
+            // Formatear datos para Excel
+            const formattedData = exportData.map(item => ({
+                'Fecha': item.work_date,
+                'Empleado': item.employees?.full_name || 'Desconocido',
+                'DNI': item.employees?.dni || '',
+                'Cargo': item.employees?.position || '',
+                'Sede': item.employees?.sede || '',
+                'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE') : '-',
+                'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE') : '-',
+                'Estado': item.is_late ? 'TARDE' : (item.record_type === 'AUSENCIA' || item.record_type === 'INASISTENCIA' ? 'AUSENTE' : 'PUNTUAL'),
+                'Tipo': item.record_type,
+                'Validado': item.validated ? 'SÍ' : 'NO',
+                'Motivo/Notas': item.notes || item.absence_reason || ''
+            }))
+
+            // Crear libro y hoja
+            const wb = XLSX.utils.book_new()
+            const ws = XLSX.utils.json_to_sheet(formattedData)
+            
+            // Ajustar ancho de columnas
+            const wscols = [
+                {wch: 12}, // Fecha
+                {wch: 30}, // Empleado
+                {wch: 12}, // DNI
+                {wch: 20}, // Cargo
+                {wch: 15}, // Sede
+                {wch: 12}, // Entrada
+                {wch: 12}, // Salida
+                {wch: 10}, // Estado
+                {wch: 15}, // Tipo
+                {wch: 8},  // Validado
+                {wch: 40}  // Notas
+            ]
+            ws['!cols'] = wscols
+
+            XLSX.utils.book_append_sheet(wb, ws, 'Asistencias')
+            
+            // Descargar archivo
+            const fileName = `Reporte_Asistencias_${new Date().toISOString().split('T')[0]}.xlsx`
+            XLSX.writeFile(wb, fileName)
+
+        } catch (error) {
+            console.error('Error exportando:', error)
+            alert('Error al exportar: ' + error.message)
+        } finally {
+            setExporting(false)
         }
     }
 
@@ -160,7 +273,14 @@ export default function AttendanceList() {
     }
 
     function formatDate(dateString) {
-        return new Date(dateString).toLocaleDateString('es-ES', {
+        if (!dateString) return '';
+        // Solución para problema de zona horaria:
+        // "2026-01-21" se interpreta como UTC 00:00, que en Perú es día 20 19:00.
+        // Forzamos la interpretación como fecha local sumando la hora T12:00:00 o parseando manualmente.
+        const [year, month, day] = dateString.split('-');
+        const date = new Date(year, month - 1, day);
+        
+        return date.toLocaleDateString('es-ES', {
             weekday: 'short',
             year: 'numeric',
             month: 'short',
@@ -193,17 +313,33 @@ export default function AttendanceList() {
                         Visualiza y filtra todas las asistencias registradas
                     </p>
                 </div>
-                {!hasEmployeeProfile && (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-w-sm flex items-start gap-3">
-                        <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-                        <div>
-                            <p className="text-sm font-bold text-yellow-800">Modo Compatibilidad</p>
-                            <p className="text-xs text-yellow-700 mt-1">
-                                Usuario de prueba sin perfil vinculado. Se intentará usar su ID de sesión.
-                            </p>
+                <div className="flex flex-col items-end gap-2">
+                    <button
+                        onClick={exportToExcel}
+                        disabled={exporting || loading}
+                        className={`flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg shadow-sm hover:bg-green-700 transition-colors ${
+                            (exporting || loading) ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
+                    >
+                        {exporting ? (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                            <Download className="h-4 w-4" />
+                        )}
+                        {exporting ? 'Exportando...' : 'Exportar Excel'}
+                    </button>
+                    {!hasEmployeeProfile && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-w-sm flex items-start gap-3">
+                            <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
+                            <div>
+                                <p className="text-sm font-bold text-yellow-800">Modo Compatibilidad</p>
+                                <p className="text-xs text-yellow-700 mt-1">
+                                    Usuario de prueba sin perfil vinculado. Se intentará usar su ID de sesión.
+                                </p>
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
 
             {/* Estadísticas */}
@@ -442,6 +578,59 @@ export default function AttendanceList() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Paginación */}
+            {!loading && attendances.length > 0 && (
+                <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6 rounded-b-lg shadow-md mt-[-24px] mb-6">
+                    <div className="flex flex-1 justify-between sm:hidden">
+                        <button
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                            Anterior
+                        </button>
+                        <button
+                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={currentPage === totalPages}
+                            className="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                            Siguiente
+                        </button>
+                    </div>
+                    <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+                        <div>
+                            <p className="text-sm text-gray-700">
+                                Mostrando <span className="font-medium">{(currentPage - 1) * PAGE_SIZE + 1}</span> a <span className="font-medium">{Math.min(currentPage * PAGE_SIZE, totalRecords)}</span> de <span className="font-medium">{totalRecords}</span> resultados
+                            </p>
+                        </div>
+                        <div>
+                            <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                    className="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50"
+                                >
+                                    <span className="sr-only">Anterior</span>
+                                    <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+                                </button>
+                                {/* Números de página simplificados */}
+                                <span className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 focus:outline-offset-0">
+                                    Página {currentPage} de {totalPages}
+                                </span>
+                                <button
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                    className="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50"
+                                >
+                                    <span className="sr-only">Siguiente</span>
+                                    <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                                </button>
+                            </nav>
+                        </div>
                     </div>
                 </div>
             )}
