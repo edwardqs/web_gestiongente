@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom' // Importar Link
 import { useAuth } from '../context/AuthContext'
-import { 
-  Users, 
-  Home, 
-  LogOut, 
+import {
+  Users,
+  Home,
+  LogOut,
   Settings,
   FileText,
   Briefcase,
@@ -21,7 +21,7 @@ import {
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
   const { signOut, user } = useAuth()
-  
+
   // Estado para manejar qué menús están expandidos por su etiqueta (label)
   const [expandedMenus, setExpandedMenus] = useState({})
 
@@ -34,33 +34,33 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
   }
 
   const menuItems = [
-    { icon: Home, label: 'Inicio', href: '/' }, 
+    { icon: Home, label: 'Inicio', href: '/' },
     { icon: Users, label: 'Empleados', href: '#' }, // Podría llevar a /employees/all en el futuro
-    { icon: Clock, label: 'Asistencias', href: '/attendance' },
-    { 
-      icon: Briefcase, 
-      label: 'Dptos / Sedes', 
+    { icon: Clock, label: 'Asistencias', href: '/attendance-list' },
+    {
+      icon: Briefcase,
+      label: 'Dptos / Sedes',
       href: '#',
       submenu: [
         { label: 'ADM. CENTRAL', icon: Building2, href: '/employees/adm-central' },
-        { 
-          label: 'Trujillo', 
+        {
+          label: 'Trujillo',
           icon: MapPin,
           submenu: [
             { label: 'Snacks', icon: Store, href: '/employees/trujillo?business=snacks' },
             { label: 'OPL', icon: Store, href: '/employees/trujillo?business=opl' }
           ]
         },
-        { 
-          label: 'Chimbote', 
+        {
+          label: 'Chimbote',
           icon: MapPin,
           submenu: [
             { label: 'Bebidas', icon: Store, href: '/employees/chimbote?business=bebidas' },
             { label: 'Snacks', icon: Store, href: '/employees/chimbote?business=snacks' }
           ]
         },
-        { 
-          label: 'Huaraz', 
+        {
+          label: 'Huaraz',
           icon: MapPin,
           submenu: [
             { label: 'Bebida', icon: Store, href: '/employees/huaraz?business=bebida' },
@@ -88,7 +88,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
     // Si tiene submenú es un botón toggle, si no es un Link
     const Component = hasSubmenu ? 'button' : Link
-    const props = hasSubmenu 
+    const props = hasSubmenu
       ? { onClick: () => toggleMenu(item.label), type: 'button' }
       : { to: item.href } // Link usa 'to', no 'href'
 
@@ -105,15 +105,15 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
           title={isCollapsed ? item.label : ''}
         >
           {Icon && (
-            <Icon 
-              size={level === 0 ? 22 : 18} 
+            <Icon
+              size={level === 0 ? 22 : 18}
               className={`
                 ${level === 0 ? 'min-w-[22px]' : 'min-w-[18px]'} 
                 ${isExpanded ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'}
-              `} 
+              `}
             />
           )}
-          
+
           {!isCollapsed && (
             <>
               <span className={`font-medium whitespace-nowrap flex-1 text-left ${level > 0 ? 'text-sm' : ''}`}>
@@ -144,14 +144,14 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     <>
       {/* Overlay para móvil */}
       {isOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-20 lg:hidden"
           onClick={() => setIsOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <aside 
+      <aside
         className={`
           fixed top-0 left-0 z-30 h-screen bg-white border-r border-gray-200 transition-all duration-300 ease-in-out overflow-y-auto overflow-x-hidden scrollbar-hide
           ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
@@ -162,10 +162,10 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
           {/* Header del Sidebar */}
           <div className={`flex items-center h-16 px-4 border-b border-gray-100 sticky top-0 bg-white z-10 ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
             {!isCollapsed && <span className="text-xl font-bold text-blue-600 whitespace-nowrap">PAUSER RRHH</span>}
-            
+
             <div className="flex items-center">
               {/* Botón colapsar (Desktop) */}
-              <button 
+              <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
                 className="hidden lg:flex p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-blue-600 transition-colors"
                 title={isCollapsed ? "Expandir menú" : "Colapsar menú"}
@@ -174,8 +174,8 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
               </button>
 
               {/* Botón cerrar (Móvil) */}
-              <button 
-                onClick={() => setIsOpen(false)} 
+              <button
+                onClick={() => setIsOpen(false)}
                 className="lg:hidden p-1 ml-2 rounded-md hover:bg-gray-100 text-gray-500"
               >
                 <X size={20} />
@@ -204,7 +204,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
                 </div>
               )}
             </div>
-            
+
             <button
               onClick={signOut}
               className={`

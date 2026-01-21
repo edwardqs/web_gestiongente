@@ -4,7 +4,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import RegisterEmployee from './pages/RegisterEmployee'
 import EmployeesList from './pages/EmployeesList'
-import Attendance from './pages/Attendance'
+import AttendanceList from './pages/AttendanceList'
 import DashboardLayout from './layouts/DashboardLayout'
 
 // Componente para proteger rutas privadas
@@ -32,7 +32,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          
+
           <Route path="/" element={
             <PrivateRoute>
               <Dashboard />
@@ -42,12 +42,6 @@ function App() {
           <Route path="/register-employee" element={
             <PrivateRoute>
               <RegisterEmployee />
-            </PrivateRoute>
-          } />
-
-          <Route path="/attendance" element={
-            <PrivateRoute>
-              <Attendance />
             </PrivateRoute>
           } />
 
@@ -62,6 +56,13 @@ function App() {
           <Route path="/employees/:sede" element={
             <PrivateRoute>
               <EmployeesList />
+            </PrivateRoute>
+          } />
+
+          {/* Ruta para ver lista de asistencias */}
+          <Route path="/attendance-list" element={
+            <PrivateRoute>
+              <AttendanceList />
             </PrivateRoute>
           } />
 
