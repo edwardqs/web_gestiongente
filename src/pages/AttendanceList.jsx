@@ -8,6 +8,7 @@ export default function AttendanceList() {
     const [attendances, setAttendances] = useState([])
     const [loading, setLoading] = useState(true)
     const [selectedLocation, setSelectedLocation] = useState(null)
+    const [reasonModal, setReasonModal] = useState(null)
     const [validationModal, setValidationModal] = useState(null)
     const [validationNotes, setValidationNotes] = useState('')
     const [validating, setValidating] = useState(false)
@@ -17,6 +18,9 @@ export default function AttendanceList() {
         dateTo: '',
         search: ''
     })
+
+    // Verificar si el usuario tiene un perfil de empleado vinculado (o modo compatibilidad)
+    const hasEmployeeProfile = !!user?.employee_id || !!user?.id;
 
     useEffect(() => {
         loadAttendances()
@@ -92,12 +96,20 @@ export default function AttendanceList() {
     async function handleValidate() {
         if (!validationModal) return
 
+        // Usar ID de empleado si existe, sino intentar con el ID de usuario (Auth ID) como fallback
+        const supervisorId = user?.employee_id || user?.id;
+
+        if (!supervisorId) {
+            alert('Error: No se pudo identificar al usuario actual.')
+            return
+        }
+
         try {
             setValidating(true)
 
             const { data, error } = await supabase.rpc('supervisor_validate_attendance', {
                 p_attendance_id: validationModal.attendanceId,
-                p_supervisor_id: user.employee_id,
+                p_supervisor_id: supervisorId, // Usamos el ID determinado
                 p_validated: validationModal.approved,
                 p_notes: validationNotes || null
             })
@@ -160,7 +172,8 @@ export default function AttendanceList() {
         if (!dateString) return '-'
         return new Date(dateString).toLocaleTimeString('es-ES', {
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
+            hour12: true
         })
     }
 
@@ -173,11 +186,24 @@ export default function AttendanceList() {
 
     return (
         <div className="p-6">
-            <div className="mb-6">
-                <h1 className="text-3xl font-bold text-gray-900">Registro de Asistencias</h1>
-                <p className="text-gray-600 mt-2">
-                    Visualiza y filtra todas las asistencias registradas
-                </p>
+            <div className="mb-6 flex justify-between items-start">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900">Registro de Asistencias</h1>
+                    <p className="text-gray-600 mt-2">
+                        Visualiza y filtra todas las asistencias registradas
+                    </p>
+                </div>
+                {!hasEmployeeProfile && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-w-sm flex items-start gap-3">
+                        <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-bold text-yellow-800">Modo Compatibilidad</p>
+                            <p className="text-xs text-yellow-700 mt-1">
+                                Usuario de prueba sin perfil vinculado. Se intentará usar su ID de sesión.
+                            </p>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Estadísticas */}
@@ -293,9 +319,9 @@ export default function AttendanceList() {
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empleado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entrada</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Salida</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Motivo</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Validado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ubicación</th>
                                 </tr>
@@ -316,14 +342,25 @@ export default function AttendanceList() {
                                                 {formatTime(attendance.check_in)}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            <div className="flex items-center">
-                                                <Clock className="h-4 w-4 mr-1 text-gray-400" />
-                                                {formatTime(attendance.check_out)}
-                                            </div>
-                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(attendance)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap">{getRecordTypeBadge(attendance.record_type || 'ASISTENCIA')}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            {(attendance.notes || attendance.absence_reason || attendance.evidence_url) ? (
+                                                <button
+                                                    onClick={() => setReasonModal({
+                                                        employee: attendance.employees?.full_name,
+                                                        notes: attendance.absence_reason || attendance.notes,
+                                                        evidence: attendance.evidence_url
+                                                    })}
+                                                    className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                                                >
+                                                    <AlertCircle className="h-4 w-4" />
+                                                    Ver Detalle
+                                                </button>
+                                            ) : (
+                                                <span className="text-sm text-gray-400">-</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             {attendance.validated ? (
                                                 <div className="flex items-center gap-2">
@@ -333,25 +370,35 @@ export default function AttendanceList() {
                                             ) : (
                                                 <div className="flex items-center gap-2">
                                                     <button
-                                                        onClick={() => setValidationModal({
+                                                        onClick={() => hasEmployeeProfile && setValidationModal({
                                                             attendanceId: attendance.id,
                                                             employeeName: attendance.employees?.full_name,
                                                             approved: true
                                                         })}
-                                                        className="flex items-center gap-1 px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
-                                                        title="Aprobar"
+                                                        className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                                                            hasEmployeeProfile 
+                                                                ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                                                        }`}
+                                                        title={hasEmployeeProfile ? "Aprobar" : "No tiene permisos"}
+                                                        disabled={!hasEmployeeProfile}
                                                     >
                                                         <CheckCircle className="h-4 w-4" />
                                                         Aprobar
                                                     </button>
                                                     <button
-                                                        onClick={() => setValidationModal({
+                                                        onClick={() => hasEmployeeProfile && setValidationModal({
                                                             attendanceId: attendance.id,
                                                             employeeName: attendance.employees?.full_name,
                                                             approved: false
                                                         })}
-                                                        className="flex items-center gap-1 px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 transition-colors"
-                                                        title="Rechazar"
+                                                        className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+                                                            hasEmployeeProfile 
+                                                                ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                                                                : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                                                        }`}
+                                                        title={hasEmployeeProfile ? "Rechazar" : "No tiene permisos"}
+                                                        disabled={!hasEmployeeProfile}
                                                     >
                                                         <XCircle className="h-4 w-4" />
                                                         Rechazar
@@ -399,10 +446,66 @@ export default function AttendanceList() {
                 </div>
             )}
 
+            {/* Modal de Detalle de Motivo */}
+            {reasonModal && (
+                <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
+                    <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-gray-100 transform scale-100 transition-all">
+                        <div className="p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900">
+                                    Detalle de Justificación
+                                </h3>
+                                <button
+                                    onClick={() => setReasonModal(null)}
+                                    className="text-gray-400 hover:text-gray-500"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            
+                            <p className="text-sm text-gray-600 mb-4">
+                                Empleado: <span className="font-semibold">{reasonModal.employee}</span>
+                            </p>
+
+                            <div className="mb-4">
+                                <h4 className="text-sm font-medium text-gray-700 mb-2">Motivo / Notas:</h4>
+                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm text-gray-800">
+                                    {reasonModal.notes || 'Sin notas adicionales'}
+                                </div>
+                            </div>
+
+                            {reasonModal.evidence && (
+                                <div className="mb-6">
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2">Evidencia Adjunta:</h4>
+                                    <a 
+                                        href={reasonModal.evidence}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-2 p-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+                                    >
+                                        <CheckCircle className="h-5 w-5" />
+                                        <span className="font-medium">Ver Archivo de Evidencia</span>
+                                    </a>
+                                </div>
+                            )}
+
+                            <div className="flex justify-end">
+                                <button
+                                    onClick={() => setReasonModal(null)}
+                                    className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors"
+                                >
+                                    Cerrar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Modal de Validación */}
             {validationModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
+                    <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-gray-100 transform scale-100 transition-all">
                         <div className="p-6">
                             <h3 className="text-lg font-semibold text-gray-900 mb-4">
                                 {validationModal.approved ? '✓ Aprobar Asistencia' : '✗ Rechazar Asistencia'}
@@ -451,8 +554,8 @@ export default function AttendanceList() {
 
             {/* Modal de Mapa */}
             {selectedLocation && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+                <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
+                    <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden border border-gray-100 transform scale-100 transition-all">
                         <div className="flex items-center justify-between p-4 border-b border-gray-200">
                             <div>
                                 <h3 className="text-lg font-semibold text-gray-900">Ubicación de Registro</h3>
