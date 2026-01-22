@@ -28,8 +28,21 @@ export default function AttendanceList() {
         search: ''
     })
 
-    // Verificar si el usuario tiene un perfil de empleado vinculado (o modo compatibilidad)
-    const hasEmployeeProfile = !!user?.employee_id || !!user?.id;
+    // Verificar permisos de validación (Solo RRHH)
+    const canValidate = () => {
+        if (!user?.position) return false
+        
+        const normalizedPosition = user.position.trim().toUpperCase()
+        const allowedPositions = [
+            'ANALISTA DE GENTE Y GESTIÓN',
+            'JEFE DE ÁREA DE GENTE Y GESTIÓN',
+            'ADMIN' // Mantenemos admin por seguridad/debugging
+        ]
+        
+        return allowedPositions.includes(normalizedPosition)
+    }
+
+    const hasValidationPermission = canValidate()
 
     useEffect(() => {
         // Reset page when filters change
@@ -209,11 +222,15 @@ export default function AttendanceList() {
     async function handleValidate() {
         if (!validationModal) return
 
-        // Usar ID de empleado si existe, sino intentar con el ID de usuario (Auth ID) como fallback
-        const supervisorId = user?.employee_id || user?.id;
+        // Usar ID de empleado si existe
+        // Si no existe perfil de empleado, NO podemos usar user.id (Auth ID) directamente
+        // porque la función RPC espera un UUID válido de la tabla employees, no de auth.users.
+        // A MENOS que hayamos insertado el user.id en employees también.
+        
+        const supervisorId = user?.employee_id;
 
         if (!supervisorId) {
-            alert('Error: No se pudo identificar al usuario actual.')
+            alert('Error: No se encontró un perfil de empleado asociado a este usuario. No puedes validar asistencias.')
             return
         }
 
@@ -222,7 +239,7 @@ export default function AttendanceList() {
 
             const { data, error } = await supabase.rpc('supervisor_validate_attendance', {
                 p_attendance_id: validationModal.attendanceId,
-                p_supervisor_id: supervisorId, // Usamos el ID determinado
+                p_supervisor_id: supervisorId, // Usamos el ID de empleado real
                 p_validated: validationModal.approved,
                 p_notes: validationNotes || null
             })
@@ -328,13 +345,13 @@ export default function AttendanceList() {
                         )}
                         {exporting ? 'Exportando...' : 'Exportar Excel'}
                     </button>
-                    {!hasEmployeeProfile && (
+                    {!hasValidationPermission && (
                         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-w-sm flex items-start gap-3">
                             <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
                             <div>
-                                <p className="text-sm font-bold text-yellow-800">Modo Compatibilidad</p>
+                                <p className="text-sm font-bold text-yellow-800">Modo Lectura</p>
                                 <p className="text-xs text-yellow-700 mt-1">
-                                    Usuario de prueba sin perfil vinculado. Se intentará usar su ID de sesión.
+                                    Solo 'Analista de Gente y Gestión' y 'Jefe de Área' pueden validar.
                                 </p>
                             </div>
                         </div>
@@ -506,35 +523,35 @@ export default function AttendanceList() {
                                             ) : (
                                                 <div className="flex items-center gap-2">
                                                     <button
-                                                        onClick={() => hasEmployeeProfile && setValidationModal({
+                                                        onClick={() => hasValidationPermission && setValidationModal({
                                                             attendanceId: attendance.id,
                                                             employeeName: attendance.employees?.full_name,
                                                             approved: true
                                                         })}
                                                         className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                                                            hasEmployeeProfile 
+                                                            hasValidationPermission 
                                                                 ? 'bg-green-100 text-green-700 hover:bg-green-200' 
                                                                 : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
                                                         }`}
-                                                        title={hasEmployeeProfile ? "Aprobar" : "No tiene permisos"}
-                                                        disabled={!hasEmployeeProfile}
+                                                        title={hasValidationPermission ? "Aprobar" : "Requiere permisos de RRHH"}
+                                                        disabled={!hasValidationPermission}
                                                     >
                                                         <CheckCircle className="h-4 w-4" />
                                                         Aprobar
                                                     </button>
                                                     <button
-                                                        onClick={() => hasEmployeeProfile && setValidationModal({
+                                                        onClick={() => hasValidationPermission && setValidationModal({
                                                             attendanceId: attendance.id,
                                                             employeeName: attendance.employees?.full_name,
                                                             approved: false
                                                         })}
                                                         className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
-                                                            hasEmployeeProfile 
+                                                            hasValidationPermission 
                                                                 ? 'bg-red-100 text-red-700 hover:bg-red-200' 
                                                                 : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
                                                         }`}
-                                                        title={hasEmployeeProfile ? "Rechazar" : "No tiene permisos"}
-                                                        disabled={!hasEmployeeProfile}
+                                                        title={hasValidationPermission ? "Rechazar" : "Requiere permisos de RRHH"}
+                                                        disabled={!hasValidationPermission}
                                                     >
                                                         <XCircle className="h-4 w-4" />
                                                         Rechazar

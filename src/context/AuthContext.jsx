@@ -62,12 +62,12 @@ export const AuthProvider = ({ children }) => {
 
   const fetchProfile = async (authUser) => {
     try {
-      // Optimización: Si ya estamos cargando o tenemos datos recientes, evitar re-llamadas innecesarias
-      // Pero como fetchProfile se llama desde useEffect, mejor dejarlo simple.
-      
       const { data, error } = await supabase.rpc('get_user_employee_profile', {
         p_email: authUser.email
       })
+
+      // DEBUG: Ver qué está devolviendo RPC
+      console.log('Perfil RPC Data:', data);
 
       if (data && !error) {
         // Combinar datos de auth y empleado
@@ -76,7 +76,7 @@ export const AuthProvider = ({ children }) => {
           employee_id: data.id,
           role: data.role,
           full_name: data.full_name,
-          position: data.position,
+          position: data.position, // Asegurarnos de mapear 'position' correctamente
           profile: data
         })
       } else {
