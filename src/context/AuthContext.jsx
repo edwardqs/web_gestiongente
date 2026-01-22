@@ -62,36 +62,61 @@ export const AuthProvider = ({ children }) => {
 
   const fetchProfile = async (authUser) => {
     try {
-      const { data, error } = await supabase.rpc('get_user_employee_profile', {
-        p_email: authUser.email
-      })
+      console.log('Buscando perfil para:', authUser.email);
+      
+      // INTENTO 1: Consulta Directa a tabla employees
+      // Esto suele ser más robusto si RLS está bien configurado
+      let employeeData = null;
+      
+      const { data: directData, error: directError } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('email', authUser.email)
+        .maybeSingle(); // Usamos maybeSingle para no lanzar error si no existe
 
-      // DEBUG: Ver qué está devolviendo RPC
-      console.log('Perfil RPC Data:', data);
-
-      if (data && !error) {
-        // Combinar datos de auth y empleado
-        setUser({
-          ...authUser,
-          employee_id: data.id,
-          role: data.role,
-          full_name: data.full_name,
-          position: data.position, // Asegurarnos de mapear 'position' correctamente
-          profile: data
-        })
+      if (!directError && directData) {
+        console.log('Perfil encontrado (Directo):', directData);
+        employeeData = directData;
       } else {
+        console.warn('Fallo búsqueda directa:', directError);
+        
+        // INTENTO 2: Fallback a RPC si la directa falla
+        const { data: rpcData, error: rpcError } = await supabase.rpc('get_user_employee_profile', {
+          p_email: authUser.email
+        })
+        
+        if (!rpcError && rpcData) {
+           console.log('Perfil encontrado (RPC):', rpcData);
+           employeeData = rpcData;
+        }
+      }
+
+      if (employeeData) {
+        // Combinar datos de auth y empleado
+        const finalUser = {
+          ...authUser,
+          employee_id: employeeData.id,
+          role: employeeData.role || employeeData.employee_type, // Priorizar role, fallback a tipo
+          full_name: employeeData.full_name,
+          position: employeeData.position,
+          sede: employeeData.sede,
+          profile: employeeData
+        };
+        console.log('Usuario Final Configurado:', finalUser);
+        setUser(finalUser)
+      } else {
+        console.warn('Perfil NO encontrado en ninguna búsqueda');
         // Fallback rápido
         setUser({
             ...authUser,
             employee_id: authUser.id,
-            role: 'ADMIN',
+            role: 'ADMIN', // Fallback temporal
             full_name: authUser.email.split('@')[0],
             profile: null
         })
       }
     } catch (err) {
       console.error('Error fetching profile:', err)
-      // Asegurar que el usuario pueda entrar aunque falle el perfil
       setUser(authUser)
     } finally {
       setLoading(false)

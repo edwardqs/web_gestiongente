@@ -63,14 +63,43 @@ export default function Dashboard() {
 
   // Función para obtener config según tipo de registro
   const getRecordConfig = (activity) => {
-    // 1. Inasistencias
-    if (activity.record_type === 'AUSENCIA' || activity.record_type === 'INASISTENCIA') {
+    const type = activity.record_type;
+
+    // 1. Inasistencias y Tipos Especiales
+    if (type === 'FALTA JUSTIFICADA' || type === 'AUSENCIA SIN JUSTIFICAR' || type === 'AUSENCIA' || type === 'INASISTENCIA') {
       return {
         icon: <XCircle size={20} />,
         color: 'text-red-600 bg-red-50',
-        text: 'Reportó Inasistencia',
-        subtext: activity.absence_reason || 'Sin motivo especificado'
+        text: type === 'AUSENCIA SIN JUSTIFICAR' ? 'Ausencia Injustificada' : 'Falta Justificada',
+        subtext: activity.notes || activity.absence_reason || 'Sin motivo especificado'
       }
+    }
+
+    if (type === 'DESCANSO MÉDICO') {
+        return {
+            icon: <Activity size={20} />,
+            color: 'text-indigo-600 bg-indigo-50',
+            text: 'Descanso Médico',
+            subtext: activity.subcategory || activity.notes || 'General'
+        }
+    }
+
+    if (type === 'LICENCIA CON GOCE') {
+        return {
+             icon: <FileText size={20} />,
+             color: 'text-purple-600 bg-purple-50',
+             text: 'Licencia con Goce',
+             subtext: activity.notes || 'Sin detalle'
+        }
+    }
+    
+    if (type === 'VACACIONES') {
+        return {
+             icon: <Calendar size={20} />,
+             color: 'text-orange-600 bg-orange-50',
+             text: 'Vacaciones',
+             subtext: 'Periodo vacacional'
+        }
     }
 
     // 2. Salidas

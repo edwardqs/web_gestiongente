@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { Calendar, Clock, Filter, Search, CheckCircle, XCircle, AlertCircle, MapPin, X, ChevronLeft, ChevronRight, Download } from 'lucide-react'
@@ -43,27 +43,60 @@ export default function AttendanceList() {
     }
 
     const hasValidationPermission = canValidate()
+    
+    // Ref para controlar la primera carga y evitar duplicados
+    const isFirstRender = useRef(true)
 
     useEffect(() => {
-        // Reset page when filters change
-        setCurrentPage(1)
-        loadAttendances(1)
+        // Cuando cambian los filtros:
+        // Si estamos en página 1, recargamos manualmente.
+        // Si no, volvemos a la 1 (esto disparará el efecto de currentPage).
+        if (currentPage === 1) {
+            loadAttendances(1)
+        } else {
+            setCurrentPage(1)
+        }
     }, [filters])
 
     useEffect(() => {
-        // Load data when page changes (if not first load which is handled above)
-        if (currentPage > 1) {
-            loadAttendances(currentPage)
+        // Evitar doble carga en el montaje inicial (ya lo maneja el efecto de filtros)
+        if (isFirstRender.current) {
+            isFirstRender.current = false
+            return
         }
+        
+        // Cargar datos cuando cambia la página
+        loadAttendances(currentPage)
     }, [currentPage])
+
+    // Helper para aplicar filtros
+    const applyFilters = (query, currentFilters) => {
+        if (currentFilters.status === 'on_time') {
+            // Solo asistencias marcadas como no tarde
+            query = query.eq('record_type', 'ASISTENCIA').eq('is_late', false)
+        } else if (currentFilters.status === 'late') {
+            // Solo asistencias marcadas como tarde
+            query = query.eq('record_type', 'ASISTENCIA').eq('is_late', true)
+        } else if (currentFilters.status === 'absent') {
+             // Cualquier tipo de ausencia o falta (incluyendo registros antiguos sin check_in)
+             query = query.or('record_type.in.(AUSENCIA,INASISTENCIA,FALTA JUSTIFICADA,AUSENCIA SIN JUSTIFICAR),check_in.is.null')
+        } else if (currentFilters.status === 'medical') {
+            query = query.eq('record_type', 'DESCANSO MÉDICO')
+        } else if (currentFilters.status === 'license') {
+            query = query.eq('record_type', 'LICENCIA CON GOCE')
+        } else if (currentFilters.status === 'vacation') {
+            query = query.eq('record_type', 'VACACIONES')
+        }
+
+        if (currentFilters.dateFrom) query = query.gte('work_date', currentFilters.dateFrom)
+        if (currentFilters.dateTo) query = query.lte('work_date', currentFilters.dateTo)
+        
+        return query
+    }
 
     async function loadAttendances(page = 1) {
         try {
             setLoading(true)
-            // ... (Rest of logic same as before, calling buildQuery internally if refactored, but here we keep it)
-            
-            // Reusing logic is hard without refactoring, so I will implement a separate buildQuery helper or just copy logic for export
-            // For now, let's keep loadAttendances as is and add export logic separately.
             
             // Calcular rango para paginación (0-indexed)
             const from = (page - 1) * PAGE_SIZE
@@ -82,19 +115,33 @@ export default function AttendanceList() {
         `, { count: 'exact' }) // Solicitar conteo total
                 .order('work_date', { ascending: false })
                 .order('check_in', { ascending: false })
-                .range(from, to)
 
-            // Aplicar filtros (Logic duplicated for now, ideal to refactor)
-            if (filters.status === 'on_time') {
-                query = query.not('check_in', 'is', null).eq('is_late', false).neq('record_type', 'AUSENCIA')
-            } else if (filters.status === 'late') {
-                query = query.not('check_in', 'is', null).eq('is_late', true)
-            } else if (filters.status === 'absent') {
-                query = query.or('check_in.is.null,record_type.eq.AUSENCIA')
+            // Aplicar filtros usando el helper
+            query = applyFilters(query, filters)
+
+            // Manejo de Búsqueda por Texto (Server Side)
+            // Esto es crucial para que la paginación funcione correctamente con búsqueda
+            if (filters.search) {
+                const searchLower = filters.search.toLowerCase()
+                
+                // Paso 1: Buscar empleados que coincidan
+                // Nota: Esto es necesario porque PostgREST no facilita el filtrado OR entre tablas unidas fácilmente
+                const { data: matchedEmployees } = await supabase
+                    .from('employees')
+                    .select('id')
+                    .or(`full_name.ilike.%${searchLower}%,dni.ilike.%${searchLower}%`)
+                
+                if (matchedEmployees && matchedEmployees.length > 0) {
+                    const empIds = matchedEmployees.map(e => e.id)
+                    query = query.in('employee_id', empIds)
+                } else {
+                    // Si no hay empleados que coincidan, forzamos resultado vacío
+                    query = query.eq('id', -1) 
+                }
             }
 
-            if (filters.dateFrom) query = query.gte('work_date', filters.dateFrom)
-            if (filters.dateTo) query = query.lte('work_date', filters.dateTo)
+            // Aplicar paginación al final
+            query = query.range(from, to)
 
             const { data, error, count } = await query
 
@@ -102,21 +149,15 @@ export default function AttendanceList() {
 
             let filteredData = data || []
             
-            // Client side search filter
-            if (filters.search) {
-                const searchLower = filters.search.toLowerCase()
-                filteredData = filteredData.filter(att =>
-                    att.employees?.full_name?.toLowerCase().includes(searchLower) ||
-                    att.employees?.dni?.includes(searchLower)
-                )
-            }
+            // Eliminamos el filtrado Client Side antiguo para evitar doble filtrado y errores de paginación
+            // El filtrado ahora es 100% Server Side
 
             setAttendances(filteredData)
             
-            if (count !== null) {
-                setTotalRecords(count)
-                setTotalPages(Math.ceil(count / PAGE_SIZE))
-            }
+            // Manejar count null o 0
+            const finalCount = count || 0
+            setTotalRecords(finalCount)
+            setTotalPages(Math.ceil(finalCount / PAGE_SIZE) || 1)
         } catch (error) {
             console.error('Error cargando asistencias:', error)
             alert('Error cargando asistencias: ' + error.message)
@@ -144,46 +185,73 @@ export default function AttendanceList() {
                 .order('work_date', { ascending: false })
                 .order('check_in', { ascending: false })
 
-            // Aplicar MISMOS filtros
-            if (filters.status === 'on_time') {
-                query = query.not('check_in', 'is', null).eq('is_late', false).neq('record_type', 'AUSENCIA')
-            } else if (filters.status === 'late') {
-                query = query.not('check_in', 'is', null).eq('is_late', true)
-            } else if (filters.status === 'absent') {
-                query = query.or('check_in.is.null,record_type.eq.AUSENCIA')
-            }
+            // Aplicar filtros usando el helper
+            query = applyFilters(query, filters)
 
-            if (filters.dateFrom) query = query.gte('work_date', filters.dateFrom)
-            if (filters.dateTo) query = query.lte('work_date', filters.dateTo)
+            // Manejo de Búsqueda por Texto (Server Side)
+            if (filters.search) {
+                const searchLower = filters.search.toLowerCase()
+                
+                // Buscar IDs de empleados que coincidan
+                const { data: matchedEmployees } = await supabase
+                    .from('employees')
+                    .select('id')
+                    .or(`full_name.ilike.%${searchLower}%,dni.ilike.%${searchLower}%`)
+                
+                if (matchedEmployees && matchedEmployees.length > 0) {
+                    const empIds = matchedEmployees.map(e => e.id)
+                    query = query.in('employee_id', empIds)
+                } else {
+                    query = query.eq('id', -1) 
+                }
+            }
 
             const { data, error } = await query
             if (error) throw error
 
             let exportData = data || []
-
-            // Client side search filter (igual que en load)
-            if (filters.search) {
-                const searchLower = filters.search.toLowerCase()
-                exportData = exportData.filter(att =>
-                    att.employees?.full_name?.toLowerCase().includes(searchLower) ||
-                    att.employees?.dni?.includes(searchLower)
-                )
-            }
+            
+            // Ya no es necesario el filtro Client Side aquí tampoco, porque la query ya viene filtrada
 
             // Formatear datos para Excel
-            const formattedData = exportData.map(item => ({
-                'Fecha': item.work_date,
-                'Empleado': item.employees?.full_name || 'Desconocido',
-                'DNI': item.employees?.dni || '',
-                'Cargo': item.employees?.position || '',
-                'Sede': item.employees?.sede || '',
-                'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE') : '-',
-                'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE') : '-',
-                'Estado': item.is_late ? 'TARDE' : (item.record_type === 'AUSENCIA' || item.record_type === 'INASISTENCIA' ? 'AUSENTE' : 'PUNTUAL'),
-                'Tipo': item.record_type,
-                'Validado': item.validated ? 'SÍ' : 'NO',
-                'Motivo/Notas': item.notes || item.absence_reason || ''
-            }))
+            const formattedData = exportData.map(item => {
+                // Logic helpers for Excel (Strings instead of JSX)
+                const getStatusText = (i) => {
+                    const t = i.record_type;
+                    if (t === 'ASISTENCIA') return i.is_late ? 'TARDANZA' : 'PUNTUAL';
+                    if (t === 'FALTA JUSTIFICADA' || t === 'AUSENCIA SIN JUSTIFICAR') return 'AUSENCIA';
+                    if (t === 'DESCANSO MÉDICO') return 'DESCANSO MÉDICO';
+                    if (t === 'LICENCIA CON GOCE') return 'LICENCIA';
+                    if (t === 'VACACIONES') return 'VACACIONES';
+                    if (!i.check_in && !t) return 'AUSENTE';
+                    return t || 'OTRO';
+                };
+
+                const getTypeText = (i) => {
+                    const t = i.record_type;
+                    if (t === 'ASISTENCIA') return 'Asistencia';
+                    if (t === 'FALTA JUSTIFICADA') return 'Justificada';
+                    if (t === 'AUSENCIA SIN JUSTIFICAR') return 'Injustificada';
+                    if (t === 'DESCANSO MÉDICO') return i.subcategory || 'General';
+                    if (t === 'LICENCIA CON GOCE') return 'Con Goce';
+                    if (t === 'VACACIONES') return 'Vacaciones';
+                    return t || '-';
+                };
+
+                return {
+                    'Fecha': item.work_date,
+                    'Empleado': item.employees?.full_name || 'Desconocido',
+                    'DNI': item.employees?.dni || '',
+                    'Cargo': item.employees?.position || '',
+                    'Sede': item.employees?.sede || '',
+                    'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE') : '-',
+                    'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE') : '-',
+                    'Estado': getStatusText(item),
+                    'Tipo': getTypeText(item),
+                    'Validado': item.validated ? 'SÍ' : 'NO',
+                    'Motivo/Notas': item.notes || item.absence_reason || ''
+                };
+            })
 
             // Crear libro y hoja
             const wb = XLSX.utils.book_new()
@@ -268,25 +336,71 @@ export default function AttendanceList() {
 
 
     function getStatusBadge(attendance) {
-        if (!attendance.check_in) {
-            return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">AUSENTE</span>
+        const type = attendance.record_type;
+        const isLate = attendance.is_late;
+        let badgeContent;
+
+        if (type === 'ASISTENCIA') {
+            if (isLate) {
+                badgeContent = <span title="TARDANZA" className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 block truncate max-w-[100px] text-center">TARDANZA</span>
+            } else {
+                badgeContent = <span title="PUNTUAL" className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 block truncate max-w-[100px] text-center">PUNTUAL</span>
+            }
+        } else if (type === 'FALTA JUSTIFICADA' || type === 'AUSENCIA SIN JUSTIFICAR') {
+             badgeContent = <span title="AUSENCIA" className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 block truncate max-w-[100px] text-center">AUSENCIA</span>
+        } else if (type === 'DESCANSO MÉDICO') {
+            badgeContent = <span title="DESCANSO MÉDICO" className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 block truncate max-w-[100px] text-center">DESCANSO MÉDICO</span>
+        } else if (type === 'LICENCIA CON GOCE') {
+             badgeContent = <span title="LICENCIA" className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800 block truncate max-w-[100px] text-center">LICENCIA</span>
+        } else if (type === 'VACACIONES') {
+             badgeContent = <span title="VACACIONES" className="px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800 block truncate max-w-[100px] text-center">VACACIONES</span>
+        } else if (!attendance.check_in && !type) {
+            badgeContent = <span title="AUSENCIA" className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 block truncate max-w-[100px] text-center">AUSENCIA</span>
+        } else {
+            const label = type || 'OTRO';
+            badgeContent = <span title={label} className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800 block truncate max-w-[100px] text-center">{label}</span>
         }
-        if (attendance.is_late) {
-            return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">TARDE</span>
-        }
-        return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">PUNTUAL</span>
+        
+        return badgeContent;
     }
 
-    function getRecordTypeBadge(recordType) {
-        const types = {
-            'ASISTENCIA': { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Asistencia' },
-            'PERMISO': { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Permiso' },
-            'VACACIONES': { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Vacaciones' },
-            'LICENCIA': { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Licencia' },
-            'AUSENCIA': { bg: 'bg-red-100', text: 'text-red-800', label: 'Ausencia' }
+    function getRecordTypeBadge(attendance) {
+        const type = attendance.record_type;
+        const subcategory = attendance.subcategory;
+
+        let label = type;
+        let colorClass = 'bg-gray-100 text-gray-800';
+
+        switch (type) {
+            case 'ASISTENCIA':
+                label = 'Asistencia';
+                colorClass = 'bg-blue-50 text-blue-700';
+                break;
+            case 'FALTA JUSTIFICADA':
+                label = 'Justificada';
+                colorClass = 'bg-green-50 text-green-700';
+                break;
+            case 'AUSENCIA SIN JUSTIFICAR':
+                label = 'Injustificada';
+                colorClass = 'bg-red-50 text-red-700';
+                break;
+            case 'DESCANSO MÉDICO':
+                label = subcategory || 'General';
+                colorClass = 'bg-indigo-50 text-indigo-700';
+                break;
+            case 'LICENCIA CON GOCE':
+                label = 'Con Goce';
+                colorClass = 'bg-purple-50 text-purple-700';
+                break;
+             case 'VACACIONES':
+                label = 'Vacaciones';
+                colorClass = 'bg-orange-50 text-orange-700';
+                break;
+            default:
+                label = type || '-';
         }
-        const type = types[recordType] || types['ASISTENCIA']
-        return <span className={`px-2 py-1 text-xs font-semibold rounded-full ${type.bg} ${type.text}`}>{type.label}</span>
+
+        return <span title={label} className={`px-2 py-1 text-xs font-semibold rounded-full ${colorClass} block truncate max-w-[120px] text-center`}>{label}</span>
     }
 
     function formatDate(dateString) {
@@ -428,7 +542,10 @@ export default function AttendanceList() {
                             <option value="all">Todos</option>
                             <option value="on_time">Puntuales</option>
                             <option value="late">Tardanzas</option>
-                            <option value="absent">Ausencias</option>
+                            <option value="absent">Ausencias (Todas)</option>
+                            <option value="medical">Descanso Médico</option>
+                            <option value="license">Licencia</option>
+                            <option value="vacation">Vacaciones</option>
                         </select>
                     </div>
                     <div>
@@ -469,11 +586,11 @@ export default function AttendanceList() {
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empleado</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[200px]">Empleado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entrada</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[120px]">Estado</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[140px]">Tipo</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Motivo</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Validado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ubicación</th>
@@ -482,10 +599,10 @@ export default function AttendanceList() {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {attendances.map((attendance) => (
                                     <tr key={attendance.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div>
-                                                <div className="text-sm font-medium text-gray-900">{attendance.employees?.full_name}</div>
-                                                <div className="text-sm text-gray-500">{attendance.employees?.dni} • {attendance.employees?.position}</div>
+                                        <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
+                                            <div className="truncate">
+                                                <div className="text-sm font-medium text-gray-900 truncate" title={attendance.employees?.full_name}>{attendance.employees?.full_name}</div>
+                                                <div className="text-sm text-gray-500 truncate" title={`${attendance.employees?.dni} • ${attendance.employees?.position}`}>{attendance.employees?.dni} • {attendance.employees?.position}</div>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(attendance.work_date)}</td>
@@ -496,7 +613,7 @@ export default function AttendanceList() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(attendance)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap">{getRecordTypeBadge(attendance.record_type || 'ASISTENCIA')}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap">{getRecordTypeBadge(attendance)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             {(attendance.notes || attendance.absence_reason || attendance.evidence_url) ? (
                                                 <button
@@ -519,6 +636,11 @@ export default function AttendanceList() {
                                                 <div className="flex items-center gap-2">
                                                     <CheckCircle className="h-5 w-5 text-green-500" />
                                                     <span className="text-xs text-gray-500">Validado</span>
+                                                </div>
+                                            ) : attendance.validated_by ? (
+                                                <div className="flex items-center gap-2">
+                                                    <XCircle className="h-5 w-5 text-red-500" />
+                                                    <span className="text-xs text-red-500">Rechazado</span>
                                                 </div>
                                             ) : (
                                                 <div className="flex items-center gap-2">

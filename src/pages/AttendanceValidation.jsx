@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getPendingValidations, validateAttendance } from '../services/attendance'
 import { CheckCircle, XCircle, Clock, MapPin, FileText, AlertCircle } from 'lucide-react'
@@ -9,10 +10,27 @@ export default function AttendanceValidation() {
     const [loading, setLoading] = useState(true)
     const [filter, setFilter] = useState('pending')
     const [validating, setValidating] = useState(null)
+    const navigate = useNavigate() // Necesitamos navigate
 
     useEffect(() => {
-        loadAttendances()
-    }, [])
+        // Verificar permisos al montar
+        if (user) {
+            const allowedRoles = ['ANALISTA_RRHH', 'JEFE_RRHH', 'ADMIN', 'SUPERVISOR_VENTAS', 'JEFE_VENTAS', 'SUPERVISOR_OPERACIONES', 'COORDINADOR_OPERACIONES']
+            const userRole = user.role || user.employee_type // Fallback
+            
+            // También verificar por cargo (position) por si acaso el role interno no se actualizó
+            const userPosition = user.position ? user.position.toUpperCase() : ''
+            const isHR = userPosition.includes('ANALISTA DE GENTE') || userPosition.includes('JEFE DE ÁREA')
+
+            if (!allowedRoles.includes(userRole) && !isHR) {
+                alert('No tiene permisos para acceder a esta página')
+                navigate('/')
+                return
+            }
+            
+            loadAttendances()
+        }
+    }, [user, navigate])
 
     async function loadAttendances() {
         try {
