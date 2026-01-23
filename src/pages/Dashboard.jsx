@@ -67,10 +67,16 @@ export default function Dashboard() {
 
     // 1. Inasistencias y Tipos Especiales
     if (type === 'FALTA JUSTIFICADA' || type === 'AUSENCIA SIN JUSTIFICAR' || type === 'AUSENCIA' || type === 'INASISTENCIA') {
+      // Determinar texto específico
+      let displayText = 'Falta Justificada';
+      if (type === 'AUSENCIA SIN JUSTIFICAR' || activity.status === 'FALTA_INJUSTIFICADA' || activity.absence_reason === 'FALTA INJUSTIFICADA') {
+          displayText = 'Falta Injustificada';
+      }
+
       return {
         icon: <XCircle size={20} />,
         color: 'text-red-600 bg-red-50',
-        text: type === 'AUSENCIA SIN JUSTIFICAR' ? 'Ausencia Injustificada' : 'Falta Justificada',
+        text: displayText,
         subtext: activity.notes || activity.absence_reason || 'Sin motivo especificado'
       }
     }

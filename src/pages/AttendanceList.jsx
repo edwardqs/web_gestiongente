@@ -32,14 +32,18 @@ export default function AttendanceList() {
     const canValidate = () => {
         if (!user?.position) return false
         
-        const normalizedPosition = user.position.trim().toUpperCase()
+        // Normalizamos quitando tildes para evitar problemas de compatibilidad
+        const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+        
+        const userPosition = normalize(user.position);
+        
         const allowedPositions = [
-            'ANALISTA DE GENTE Y GESTIÓN',
-            'JEFE DE ÁREA DE GENTE Y GESTIÓN',
-            'ADMIN' // Mantenemos admin por seguridad/debugging
+            'ANALISTA DE GENTE Y GESTION',
+            'JEFE DE AREA DE GENTE Y GESTION',
+            'ADMIN'
         ]
         
-        return allowedPositions.includes(normalizedPosition)
+        return allowedPositions.includes(userPosition)
     }
 
     const hasValidationPermission = canValidate()
@@ -69,6 +73,25 @@ export default function AttendanceList() {
         loadAttendances(currentPage)
     }, [currentPage])
 
+    // Escuchar actualizaciones en tiempo real para refrescar la lista
+    useEffect(() => {
+        const subscription = supabase
+            .channel('attendance_list_updates')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'attendance' },
+                () => {
+                    // Si hay cualquier cambio en la tabla attendance, recargamos la página actual
+                    loadAttendances(currentPage)
+                }
+            )
+            .subscribe()
+
+        return () => {
+            subscription.unsubscribe()
+        }
+    }, [currentPage, filters]) // Dependencias para que recargue con los filtros actuales
+
     // Helper para aplicar filtros
     const applyFilters = (query, currentFilters) => {
         if (currentFilters.status === 'on_time') {
@@ -94,70 +117,86 @@ export default function AttendanceList() {
         return query
     }
 
+    // Helper para obtener fecha local en formato YYYY-MM-DD
+    const getLocalDate = () => {
+        const d = new Date()
+        const year = d.getFullYear()
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+    }
+
     async function loadAttendances(page = 1) {
         try {
             setLoading(true)
             
-            // Calcular rango para paginación (0-indexed)
-            const from = (page - 1) * PAGE_SIZE
-            const to = from + PAGE_SIZE - 1
+            const offset = (page - 1) * PAGE_SIZE
+            
+            // Usar fecha local para evitar problemas de zona horaria (UTC vs Local)
+            const queryDate = filters.dateFrom || getLocalDate()
 
-            let query = supabase
-                .from('attendance')
-                .select(`
-          *,
-          employees:employee_id (
-            full_name,
-            dni,
-            position,
-            sede
-          )
-        `, { count: 'exact' }) // Solicitar conteo total
-                .order('work_date', { ascending: false })
-                .order('check_in', { ascending: false })
+            // 1. Cargar Reporte Detallado (Lista con Pendientes)
+            const { data: reportData, error: reportError } = await supabase.rpc('get_daily_attendance_report', {
+                p_date: queryDate,
+                p_search: filters.search || '',
+                p_offset: offset,
+                p_limit: PAGE_SIZE,
+                p_status: filters.status || 'all'
+            })
 
-            // Aplicar filtros usando el helper
-            query = applyFilters(query, filters)
+            if (reportError) throw reportError
 
-            // Manejo de Búsqueda por Texto (Server Side)
-            // Esto es crucial para que la paginación funcione correctamente con búsqueda
-            if (filters.search) {
-                const searchLower = filters.search.toLowerCase()
-                
-                // Paso 1: Buscar empleados que coincidan
-                // Nota: Esto es necesario porque PostgREST no facilita el filtrado OR entre tablas unidas fácilmente
-                const { data: matchedEmployees } = await supabase
-                    .from('employees')
-                    .select('id')
-                    .or(`full_name.ilike.%${searchLower}%,dni.ilike.%${searchLower}%`)
-                
-                if (matchedEmployees && matchedEmployees.length > 0) {
-                    const empIds = matchedEmployees.map(e => e.id)
-                    query = query.in('employee_id', empIds)
-                } else {
-                    // Si no hay empleados que coincidan, forzamos resultado vacío
-                    query = query.eq('id', -1) 
+            // 2. Cargar Estadísticas Globales
+            const { data: statsData, error: statsError } = await supabase.rpc('get_attendance_stats', {
+                p_date: queryDate,
+                p_search: filters.search || ''
+            })
+
+            if (statsError) console.error('Error loading stats:', statsError)
+
+            // Procesar lista
+            const processedList = (reportData || []).map(item => ({
+                id: item.attendance_id || `pending-${item.employee_id}`, 
+                work_date: queryDate, // Usar la fecha consultada para consistencia visual
+                check_in: item.check_in,
+                check_out: item.check_out,
+                is_late: item.is_late,
+                record_type: item.record_type,
+                status: item.status,
+                validated: item.validated,
+                notes: item.notes,
+                evidence_url: item.evidence_url,
+                location_in: item.location_in,
+                employees: { 
+                    full_name: item.full_name,
+                    dni: item.dni,
+                    position: item.position,
+                    sede: item.sede,
+                    profile_picture_url: item.profile_picture_url
                 }
+            }))
+
+            setAttendances(processedList)
+            
+            // Actualizar Paginación
+            const totalRows = reportData?.[0]?.total_rows || 0
+            setTotalRecords(totalRows)
+            setTotalPages(Math.ceil(totalRows / PAGE_SIZE) || 1)
+
+            // Actualizar Estadísticas (Globales)
+            if (statsData) {
+                // Actualizamos el objeto stats local del componente (aunque el componente usa variable 'stats' derivada,
+                // necesitamos un estado para stats globales si queremos que sean precisos)
+                setGlobalStats({
+                    total: statsData.total_employees,
+                    onTime: statsData.on_time,
+                    late: statsData.late,
+                    absent: statsData.absent_registered + statsData.pending // Sumamos pendientes a ausencias como pidió el usuario?
+                    // O mejor mostramos pendientes aparte. El usuario dijo "iran descontando".
+                    // Si Total es fijo, y Puntual/Tarde suben, entonces Ausencia/Pendiente baja.
+                })
             }
 
-            // Aplicar paginación al final
-            query = query.range(from, to)
-
-            const { data, error, count } = await query
-
-            if (error) throw error
-
-            let filteredData = data || []
-            
-            // Eliminamos el filtrado Client Side antiguo para evitar doble filtrado y errores de paginación
-            // El filtrado ahora es 100% Server Side
-
-            setAttendances(filteredData)
-            
-            // Manejar count null o 0
-            const finalCount = count || 0
-            setTotalRecords(finalCount)
-            setTotalPages(Math.ceil(finalCount / PAGE_SIZE) || 1)
         } catch (error) {
             console.error('Error cargando asistencias:', error)
             alert('Error cargando asistencias: ' + error.message)
@@ -166,55 +205,53 @@ export default function AttendanceList() {
         }
     }
 
+    // Nuevo estado para stats globales
+    const [globalStats, setGlobalStats] = useState({
+        total: 0,
+        onTime: 0,
+        late: 0,
+        absent: 0
+    })
+
     const exportToExcel = async () => {
         try {
             setExporting(true)
             
-            // Construir query SIN paginación
-            let query = supabase
-                .from('attendance')
-                .select(`
-                  *,
-                  employees:employee_id (
-                    full_name,
-                    dni,
-                    position,
-                    sede
-                  )
-                `)
-                .order('work_date', { ascending: false })
-                .order('check_in', { ascending: false })
+            // Definir rango de fechas
+            // Si no hay fechas seleccionadas, usar el mes actual por defecto
+            let startDate = filters.dateFrom
+            let endDate = filters.dateTo
 
-            // Aplicar filtros usando el helper
-            query = applyFilters(query, filters)
-
-            // Manejo de Búsqueda por Texto (Server Side)
-            if (filters.search) {
-                const searchLower = filters.search.toLowerCase()
+            if (!startDate || !endDate) {
+                const now = new Date()
+                const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
+                const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
                 
-                // Buscar IDs de empleados que coincidan
-                const { data: matchedEmployees } = await supabase
-                    .from('employees')
-                    .select('id')
-                    .or(`full_name.ilike.%${searchLower}%,dni.ilike.%${searchLower}%`)
-                
-                if (matchedEmployees && matchedEmployees.length > 0) {
-                    const empIds = matchedEmployees.map(e => e.id)
-                    query = query.in('employee_id', empIds)
-                } else {
-                    query = query.eq('id', -1) 
-                }
+                if (!startDate) startDate = firstDay.toISOString().split('T')[0]
+                if (!endDate) endDate = lastDay.toISOString().split('T')[0]
             }
 
-            const { data, error } = await query
+            // Usar la nueva RPC para exportación masiva
+            const { data: exportData, error } = await supabase.rpc('get_attendance_export_report', {
+                p_start_date: startDate,
+                p_end_date: endDate,
+                p_status: filters.status || 'all'
+            })
+
             if (error) throw error
 
-            let exportData = data || []
-            
-            // Ya no es necesario el filtro Client Side aquí tampoco, porque la query ya viene filtrada
+            // Filtrar localmente por búsqueda si es necesario (la RPC no tiene búsqueda por texto para ser más rápida)
+            let filteredExportData = exportData || []
+            if (filters.search) {
+                const searchLower = filters.search.toLowerCase()
+                filteredExportData = filteredExportData.filter(item => 
+                    item.full_name?.toLowerCase().includes(searchLower) || 
+                    item.dni?.toLowerCase().includes(searchLower)
+                )
+            }
 
             // Formatear datos para Excel
-            const formattedData = exportData.map(item => {
+            const formattedData = filteredExportData.map(item => {
                 // Logic helpers for Excel (Strings instead of JSX)
                 const getStatusText = (i) => {
                     const t = i.record_type;
@@ -223,8 +260,8 @@ export default function AttendanceList() {
                     if (t === 'DESCANSO MÉDICO') return 'DESCANSO MÉDICO';
                     if (t === 'LICENCIA CON GOCE') return 'LICENCIA';
                     if (t === 'VACACIONES') return 'VACACIONES';
-                    if (!i.check_in && !t) return 'AUSENTE';
-                    return t || 'OTRO';
+                    if (!i.attendance_id && !t) return 'AUSENTE (PENDIENTE)'; // Diferenciar pendiente
+                    return t || 'AUSENTE'; // Fallback para registros nulos en modo 'absent'
                 };
 
                 const getTypeText = (i) => {
@@ -232,7 +269,7 @@ export default function AttendanceList() {
                     if (t === 'ASISTENCIA') return 'Asistencia';
                     if (t === 'FALTA JUSTIFICADA') return 'Justificada';
                     if (t === 'AUSENCIA SIN JUSTIFICAR') return 'Injustificada';
-                    if (t === 'DESCANSO MÉDICO') return i.subcategory || 'General';
+                    if (t === 'DESCANSO MÉDICO') return 'General';
                     if (t === 'LICENCIA CON GOCE') return 'Con Goce';
                     if (t === 'VACACIONES') return 'Vacaciones';
                     return t || '-';
@@ -240,16 +277,16 @@ export default function AttendanceList() {
 
                 return {
                     'Fecha': item.work_date,
-                    'Empleado': item.employees?.full_name || 'Desconocido',
-                    'DNI': item.employees?.dni || '',
-                    'Cargo': item.employees?.position || '',
-                    'Sede': item.employees?.sede || '',
+                    'Empleado': item.full_name || 'Desconocido',
+                    'DNI': item.dni || '',
+                    'Cargo': item.position || '',
+                    'Sede': item.sede || '',
                     'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE') : '-',
                     'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE') : '-',
                     'Estado': getStatusText(item),
                     'Tipo': getTypeText(item),
                     'Validado': item.validated ? 'SÍ' : 'NO',
-                    'Motivo/Notas': item.notes || item.absence_reason || ''
+                    'Motivo/Notas': item.notes || ''
                 };
             })
 
@@ -266,7 +303,7 @@ export default function AttendanceList() {
                 {wch: 15}, // Sede
                 {wch: 12}, // Entrada
                 {wch: 12}, // Salida
-                {wch: 10}, // Estado
+                {wch: 15}, // Estado (más ancho)
                 {wch: 15}, // Tipo
                 {wch: 8},  // Validado
                 {wch: 40}  // Notas
@@ -276,7 +313,7 @@ export default function AttendanceList() {
             XLSX.utils.book_append_sheet(wb, ws, 'Asistencias')
             
             // Descargar archivo
-            const fileName = `Reporte_Asistencias_${new Date().toISOString().split('T')[0]}.xlsx`
+            const fileName = `Reporte_Asistencias_${startDate}_al_${endDate}.xlsx`
             XLSX.writeFile(wb, fileName)
 
         } catch (error) {
@@ -429,10 +466,10 @@ export default function AttendanceList() {
     }
 
     const stats = {
-        total: attendances.length,
-        onTime: attendances.filter(a => a.check_in && !a.is_late).length,
-        late: attendances.filter(a => a.is_late).length,
-        absent: attendances.filter(a => !a.check_in || a.record_type === 'AUSENCIA').length
+        total: globalStats.total,
+        onTime: globalStats.onTime,
+        late: globalStats.late,
+        absent: globalStats.absent
     }
 
     return (
