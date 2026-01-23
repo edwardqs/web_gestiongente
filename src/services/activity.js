@@ -1,18 +1,24 @@
 import { supabase } from '../lib/supabase'
 
 export const getRecentActivity = async (limit = 10) => {
-  const { data, error } = await supabase
-    .from('attendance')
-    .select(`
-      *,
-      employees:employee_id (
-        full_name,
-        profile_picture_url
-      )
-    `)
-    .order('created_at', { ascending: false })
-    .limit(limit)
+  // Usamos la nueva RPC para obtener datos consistentes y rápidos
+  const { data, error } = await supabase.rpc('get_dashboard_activity', {
+    p_limit: limit
+  })
   
+  // Mapeamos para mantener compatibilidad con el formato esperado por el componente
+  if (data) {
+    const formattedData = data.map(item => ({
+      ...item,
+      employees: {
+        full_name: item.full_name,
+        profile_picture_url: item.profile_picture_url,
+        position: item.position
+      }
+    }))
+    return { data: formattedData, error }
+  }
+
   return { data, error }
 }
 
@@ -21,39 +27,40 @@ export const subscribeToActivity = (callback) => {
     .channel('dashboard-attendance')
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'attendance' },
+      { event: '*', schema: 'public', table: 'attendance' }, // Escuchar TODO (Insert, Update, Delete)
       async (payload) => {
-        // Fetch employee details for the new record
-        const { data } = await supabase
-          .from('employees')
-          .select('full_name, profile_picture_url')
-          .eq('id', payload.new.employee_id)
-          .single()
+        // En lugar de intentar construir el objeto parcialmente,
+        // invocamos la RPC nuevamente para obtener el item actualizado completo con datos del empleado.
+        // O mejor aún, solo hacemos fetch del empleado si es INSERT/UPDATE.
         
-        const enrichedActivity = {
-          ...payload.new,
-          employees: data
+        if (payload.eventType === 'DELETE') {
+             // Si se borra, podríamos pasar solo el ID para que el frontend lo quite
+             callback({ id: payload.old.id, deleted: true })
+             return
         }
-        callback(enrichedActivity)
-      }
-    )
-    .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'attendance' },
-        async (payload) => {
-            // También escuchar actualizaciones (ej. validaciones, salidas)
-            const { data } = await supabase
+
+        try {
+            // Obtenemos los datos frescos del empleado para este registro
+            const { data: employeeData, error } = await supabase
             .from('employees')
-            .select('full_name, profile_picture_url')
+            .select('full_name, profile_picture_url, position')
             .eq('id', payload.new.employee_id)
             .single()
             
+            if (error) {
+                console.error('Error fetching employee details for realtime:', error)
+                return
+            }
+
             const enrichedActivity = {
-            ...payload.new,
-            employees: data
+                ...payload.new,
+                employees: employeeData
             }
             callback(enrichedActivity)
+        } catch (e) {
+            console.error('Error processing realtime activity:', e)
         }
+      }
     )
     .subscribe()
 }

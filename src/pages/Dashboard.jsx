@@ -35,11 +35,17 @@ export default function Dashboard() {
     loadActivities()
 
     // 2. Suscribirse a tiempo real
-    const subscription = subscribeToActivity((newActivity) => {
+    const subscription = subscribeToActivity((payload) => {
       setActivities(prev => {
+        // Manejar borrado
+        if (payload.deleted) {
+             return prev.filter(a => a.id !== payload.id)
+        }
+
+        // Manejar Insert/Update
         // Remover si ya existe (para updates) y agregar al inicio
-        const filtered = prev.filter(a => a.id !== newActivity.id)
-        return [newActivity, ...filtered].slice(0, 10)
+        const filtered = prev.filter(a => a.id !== payload.id)
+        return [payload, ...filtered].slice(0, 10)
       })
     })
 
