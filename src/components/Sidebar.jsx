@@ -16,7 +16,8 @@ import {
   ChevronRight,
   MapPin,
   Store,
-  Building2 // Icono para Adm. Central
+  Building2, // Icono para Adm. Central
+  Calendar // Icono para Calendario
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
@@ -38,6 +39,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     { icon: Users, label: 'Empleados', href: '#' }, // Podría llevar a /employees/all en el futuro
     { icon: Clock, label: 'Asistencias', href: '/attendance-list' },
     { icon: FileText, label: 'Solicitudes', href: '/requests' },
+    { icon: Calendar, label: 'Calendario', href: '/calendar' },
     {
       icon: Briefcase,
       label: 'Dptos / Sedes',

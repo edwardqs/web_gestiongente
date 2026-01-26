@@ -196,7 +196,7 @@ export default function Dashboard() {
       label: 'Ver Calendario', 
       icon: Calendar, 
       color: 'bg-purple-600',
-      action: () => console.log('Ir a calendario') // Pendiente
+      action: () => navigate('/calendar')
     },
   ]
 

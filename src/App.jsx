@@ -6,6 +6,7 @@ import RegisterEmployee from './pages/RegisterEmployee'
 import EmployeesList from './pages/EmployeesList'
 import AttendanceList from './pages/AttendanceList'
 import RequestsList from './pages/RequestsList'
+import CalendarRequests from './pages/CalendarRequests'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
 
@@ -72,6 +73,13 @@ function App() {
           <Route path="/requests" element={
             <PrivateRoute>
               <RequestsList />
+            </PrivateRoute>
+          } />
+
+          {/* Ruta para calendario de solicitudes */}
+          <Route path="/calendar" element={
+            <PrivateRoute>
+              <CalendarRequests />
             </PrivateRoute>
           } />
 
