@@ -5,6 +5,8 @@ import Dashboard from './pages/Dashboard'
 import RegisterEmployee from './pages/RegisterEmployee'
 import EmployeesList from './pages/EmployeesList'
 import AttendanceList from './pages/AttendanceList'
+import RequestsList from './pages/RequestsList'
+import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
 
 // Componente para proteger rutas privadas
@@ -63,6 +65,20 @@ function App() {
           <Route path="/attendance-list" element={
             <PrivateRoute>
               <AttendanceList />
+            </PrivateRoute>
+          } />
+
+          {/* Ruta para lista de solicitudes */}
+          <Route path="/requests" element={
+            <PrivateRoute>
+              <RequestsList />
+            </PrivateRoute>
+          } />
+
+          {/* Ruta para ver Papeleta de Vacaciones */}
+          <Route path="/papeleta/:id" element={
+            <PrivateRoute>
+              <PapeletaVacaciones />
             </PrivateRoute>
           } />
 

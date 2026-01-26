@@ -37,6 +37,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     { icon: Home, label: 'Inicio', href: '/' },
     { icon: Users, label: 'Empleados', href: '#' }, // Podría llevar a /employees/all en el futuro
     { icon: Clock, label: 'Asistencias', href: '/attendance-list' },
+    { icon: FileText, label: 'Solicitudes', href: '/requests' },
     {
       icon: Briefcase,
       label: 'Dptos / Sedes',
