@@ -7,7 +7,7 @@ export const getRecentActivity = async (limit = 10) => {
       .from('attendance')
       .select(`
         *,
-        employees (
+        employees!attendance_employee_id_fkey (
           full_name,
           profile_picture_url,
           position
@@ -23,7 +23,7 @@ export const getRecentActivity = async (limit = 10) => {
       .from('vacation_requests')
       .select(`
         *,
-        employees (
+        employees!vacation_requests_employee_id_fkey (
           full_name,
           profile_picture_url,
           position

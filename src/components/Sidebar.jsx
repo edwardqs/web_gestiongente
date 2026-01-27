@@ -17,7 +17,8 @@ import {
   MapPin,
   Store,
   Building2, // Icono para Adm. Central
-  Calendar // Icono para Calendario
+  Calendar, // Icono para Calendario
+  Shield // Icono para Roles
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
@@ -77,7 +78,14 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       ]
     },
     { icon: FileText, label: 'Documentos', href: '#' },
-    { icon: Settings, label: 'Configuración', href: '#' },
+    { 
+      icon: Settings, 
+      label: 'Configuración', 
+      href: '#',
+      submenu: [
+        { label: 'Roles y Permisos', icon: Shield, href: '/roles' }
+      ]
+    },
   ]
 
   // Componente Recursivo para renderizar items

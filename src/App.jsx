@@ -7,6 +7,7 @@ import EmployeesList from './pages/EmployeesList'
 import AttendanceList from './pages/AttendanceList'
 import RequestsList from './pages/RequestsList'
 import CalendarRequests from './pages/CalendarRequests'
+import RolesManagement from './pages/RolesManagement'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
 
@@ -80,6 +81,13 @@ function App() {
           <Route path="/calendar" element={
             <PrivateRoute>
               <CalendarRequests />
+            </PrivateRoute>
+          } />
+
+          {/* Ruta para gestión de roles */}
+          <Route path="/roles" element={
+            <PrivateRoute>
+              <RolesManagement />
             </PrivateRoute>
           } />
 

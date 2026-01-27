@@ -40,16 +40,11 @@ export const AuthProvider = ({ children }) => {
         setLoading(false)
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setSession(session)
-        // Solo llamar a fetchProfile si NO estamos cargando ya o si no hay usuario
-        // Evitamos llamar fetchProfile en SIGNED_IN si getSession ya lo inició
+        // Cargar perfil del usuario si hay sesión
         if (session?.user) {
-             // Pequeña optimización: Verificar si ya tenemos este usuario cargado en memoria
-             // para evitar doble fetch al inicio (getSession + onAuthStateChange suelen dispararse juntos)
-             setUser(prev => {
-                 if (prev && prev.id === session.user.id) return prev; 
-                 fetchProfile(session.user); // Si es nuevo o null, buscar perfil
-                 return prev;
-             });
+             // Llamar a fetchProfile para asegurar datos frescos y completos
+             // Esto actualizará 'user' y pondrá 'loading' en false cuando termine
+             fetchProfile(session.user);
         }
       } 
     })
@@ -65,38 +60,60 @@ export const AuthProvider = ({ children }) => {
       console.log('Buscando perfil para:', authUser.email);
       
       // INTENTO 1: Consulta Directa a tabla employees
-      // Esto suele ser más robusto si RLS está bien configurado
       let employeeData = null;
       
-      const { data: directData, error: directError } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('email', authUser.email)
-        .maybeSingle(); // Usamos maybeSingle para no lanzar error si no existe
-
-      if (!directError && directData) {
-        console.log('Perfil encontrado (Directo):', directData);
-        employeeData = directData;
-      } else {
-        console.warn('Fallo búsqueda directa:', directError);
-        
-        // INTENTO 2: Fallback a RPC si la directa falla
-        const { data: rpcData, error: rpcError } = await supabase.rpc('get_user_employee_profile', {
-          p_email: authUser.email
-        })
-        
-        if (!rpcError && rpcData) {
-           console.log('Perfil encontrado (RPC):', rpcData);
-           employeeData = rpcData;
-        }
-      }
+      // Intentamos traer también la info del rol si existe la relación
+       // Usamos try/catch silencioso para la query por si la tabla roles aun no existe o no está vinculada
+       try {
+           // IMPORTANTE: Primero obtenemos el empleado simple para evitar recursión en RLS si la hay
+           const { data: simpleEmployee, error: simpleError } = await supabase
+             .from('employees')
+             .select('*, role_id') // Solo traemos role_id primero
+             .eq('email', authUser.email)
+             .maybeSingle();
+             
+           if (simpleEmployee) {
+               employeeData = simpleEmployee;
+               
+               // Si tiene role_id, hacemos fetch manual del rol (2 pasos) para romper cualquier ciclo de query compleja
+               if (simpleEmployee.role_id) {
+                   const { data: roleData } = await supabase
+                     .from('roles')
+                     .select('*')
+                     .eq('id', simpleEmployee.role_id)
+                     .single();
+                   
+                   if (roleData) {
+                       employeeData.roles = roleData;
+                   }
+               }
+           }
+       } catch (e) {
+           console.error('Error auth manual:', e);
+           // Fallback final
+           employeeData = { email: authUser.email };
+       }
+      
+      /* Bloque anterior reemplazado por la lógica de arriba más robusta */
 
       if (employeeData) {
+        // VALIDACIÓN DE ACCESO WEB
+        // Si tiene un rol asignado y ese rol tiene web_access = false, denegar acceso
+        if (employeeData.roles && employeeData.roles.web_access === false) {
+            console.error('Acceso denegado: El rol del usuario no tiene permisos para Web');
+            alert('Tu rol actual no tiene permisos para acceder a la plataforma Web.');
+            await supabase.auth.signOut();
+            setUser(null);
+            setSession(null);
+            return;
+        }
+
         // Combinar datos de auth y empleado
         const finalUser = {
           ...authUser,
           employee_id: employeeData.id,
-          role: employeeData.role || employeeData.employee_type, // Priorizar role, fallback a tipo
+          role: employeeData.roles?.name || employeeData.role || employeeData.employee_type, // Priorizar rol relacional
+          permissions: employeeData.roles || {}, // Permisos explícitos
           full_name: employeeData.full_name,
           position: employeeData.position,
           sede: employeeData.sede,

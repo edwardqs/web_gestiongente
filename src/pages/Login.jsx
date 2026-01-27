@@ -1,16 +1,25 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom' // Importar useNavigate
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { signInWithEmail } from '../services/auth'
+import { useAuth } from '../context/AuthContext'
 import { User, Lock, Eye, EyeOff } from 'lucide-react'
 import bgImage from '../assets/imagen_pauser.jpg'
 
 export default function Login() {
-  const navigate = useNavigate() // Hook para navegar
+  const navigate = useNavigate()
+  const { session } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  // Redirección reactiva: Si ya hay sesión, ir al dashboard
+  useEffect(() => {
+    if (session) {
+      navigate('/', { replace: true })
+    }
+  }, [session, navigate])
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -32,9 +41,8 @@ export default function Login() {
         throw error
       }
       
-      console.log('Login exitoso:', data)
-      // Forzar redirección al dashboard
-      navigate('/') 
+      console.log('Login exitoso, esperando actualización de sesión...')
+      // No navegamos manualmente aquí. Esperamos a que el useEffect detecte la sesión.
       
     } catch (err) {
       console.error('Error capturado:', err)
@@ -45,9 +53,9 @@ export default function Login() {
       } else {
         setError(err.message || 'Error al iniciar sesión')
       }
-    } finally {
-      setLoading(false)
-    }
+      setLoading(false) // Solo detenemos loading si hubo error
+    } 
+    // Nota: Si el login es exitoso, mantenemos loading en true hasta que el useEffect redirija
   }
 
   return (
