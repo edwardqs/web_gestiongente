@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
+import { getRoles } from '../services/roles'
 import { Save, User, Phone, Mail, MapPin, Briefcase, Calendar, FileText, Store, Users } from 'lucide-react'
 
 export default function RegisterEmployee() {
@@ -16,6 +17,8 @@ export default function RegisterEmployee() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState(null)
+  
+  const [roles, setRoles] = useState([])
 
   const [formData, setFormData] = useState({
     sede: initialSede, // Pre-llenar sede
@@ -25,11 +28,28 @@ export default function RegisterEmployee() {
     full_name: '',
     entry_date: '',
     position: '',
+    role_id: '',
     phone: '',
     email: '',
     birth_date: '',
     address: ''
   })
+
+  // Cargar Roles al inicio
+  useEffect(() => {
+    const fetchRoles = async () => {
+        const { data } = await getRoles()
+        if (data) {
+            // Filtrar roles excluidos
+            const filtered = data.filter(r => 
+                r.name.toUpperCase() !== 'ADMINISTRADOR' && 
+                r.name.toUpperCase() !== 'JEFE DE AREA DE GENTE Y GESTION'
+            )
+            setRoles(filtered)
+        }
+    }
+    fetchRoles()
+  }, [])
 
   // Cargar datos si estamos en modo edición
   useEffect(() => {
@@ -63,6 +83,7 @@ export default function RegisterEmployee() {
           full_name: data.full_name || '',
           entry_date: data.entry_date || '',
           position: data.position || '',
+          role_id: data.role_id || '',
           phone: data.phone || '',
           email: data.email || '',
           birth_date: data.birth_date || '',
@@ -103,6 +124,14 @@ export default function RegisterEmployee() {
         [name]: value,
         business_unit: '' 
       }))
+    } else if (name === 'role_id') {
+       // Manejo especial para el rol: actualiza role_id y position
+       const selectedRole = roles.find(r => r.id.toString() === value)
+       setFormData(prev => ({
+           ...prev,
+           role_id: value,
+           position: selectedRole ? selectedRole.name : ''
+       }))
     } else {
       setFormData(prev => ({ ...prev, [name]: value }))
     }
@@ -138,6 +167,7 @@ export default function RegisterEmployee() {
           full_name: '',
           entry_date: '',
           position: '',
+          role_id: '',
           phone: '',
           email: '',
           birth_date: '',
@@ -295,20 +325,25 @@ export default function RegisterEmployee() {
               />
             </div>
 
-            {/* Puesto */}
+            {/* Puesto (Seleccionable) */}
             <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <Briefcase size={16} className="text-blue-500" /> Puesto
+                <Briefcase size={16} className="text-blue-500" /> Puesto / Cargo
               </label>
-              <input
-                type="text"
-                name="position"
-                value={formData.position}
+              <select
+                name="role_id"
+                value={formData.role_id}
                 onChange={handleChange}
-                placeholder="Ej. ANALISTA DE GENTE Y GESTIÓN"
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all uppercase"
-              />
+                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50/50"
+              >
+                <option value="">Seleccione un puesto</option>
+                {roles.map(role => (
+                  <option key={role.id} value={role.id}>{role.name}</option>
+                ))}
+              </select>
+              {/* Input oculto para mantener compatibilidad si algo falla */}
+              <input type="hidden" name="position" value={formData.position} />
             </div>
 
             {/* Celular */}

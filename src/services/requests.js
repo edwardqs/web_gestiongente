@@ -10,7 +10,8 @@ export const getPapeletaById = async (id) => {
           full_name,
           dni,
           position,
-          sede
+          sede,
+          email
         )
       `)
       .eq('id', id)
@@ -38,7 +39,8 @@ export const getRequests = async () => {
           dni,
           position,
           sede,
-          profile_picture_url
+          profile_picture_url,
+          email
         )
       `)
       .order('created_at', { ascending: false })
