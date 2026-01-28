@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRequests } from '../services/requests'
+import { getRequests, updateRequestStatus } from '../services/requests'
+import { useAuth } from '../context/AuthContext'
+import { createRoot } from 'react-dom/client'
+import { PapeletaTemplate } from '../components/PapeletaTemplate'
+import html2pdf from 'html2pdf.js'
+import { supabase } from '../lib/supabase'
 import { 
   FileText, 
   Search, 
@@ -8,15 +13,31 @@ import {
   CheckCircle, 
   XCircle, 
   Clock,
-  RefreshCw
+  RefreshCw,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react'
+
+// --- FUNCIONES DE FORMATEO PARA PDF ---
+const formatDate = (dateString) => {
+  if (!dateString) return '26/01/2026'
+  const date = new Date(dateString + 'T00:00:00')
+  return date.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+const formatLongDate = (date) => {
+  const months = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+  return `${date.getDate()} DE ${months[date.getMonth()]} DE ${date.getFullYear()}`
+}
 
 export default function RequestsList() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('ALL')
+  const [processingId, setProcessingId] = useState(null)
 
   useEffect(() => {
     fetchRequests()
@@ -26,11 +47,198 @@ export default function RequestsList() {
     setLoading(true)
     const { data, error } = await getRequests()
     if (!error) {
-      // Filtrar aquellos que no tengan empleado asociado (si la relación falla por RLS)
-      // O mostrarlos como 'Desconocido'
       setRequests(data || [])
     }
     setLoading(false)
+  }
+
+  // --- FUNCIÓN GENERAR Y SUBIR PDF ---
+  const generateAndUploadPDF = async (request) => {
+    const employee = request.employees || {}
+    const employeeName = (employee.full_name || '').toUpperCase()
+    const employeeDni = employee.dni || '00000000'
+    const emissionDate = new Date()
+
+    const renderData = {
+      employer: {
+        nombre: "PAUSER DISTRIBUCIONES S.A.C.",
+        ruc: "20600869940",
+        domicilio: "JR. PEDRO MUÑIZ NRO. 253 DPTO. 1601 SEC. JORGE CHAVEZ LA LIBERTAD - TRUJILLO",
+        representante: "GIANCARLO URBINA GAITAN",
+        dni_representante: "18161904"
+      },
+      employee: {
+        name: employeeName,
+        dni: employeeDni,
+        position: (employee.position || '').toUpperCase(),
+        sede: (employee.sede || 'TRUJILLO').toUpperCase()
+      },
+      flags: {
+        isPersonal: !request.request_type?.includes('VACACIONES') && !request.request_type?.includes('SALUD'),
+        isSalud: request.request_type?.includes('SALUD') || request.request_type?.includes('MEDICO'),
+        isVacaciones: request.request_type?.includes('VACACIONES')
+      },
+      dates: {
+        emission: emissionDate,
+        formattedStart: formatDate(request.start_date),
+        formattedEnd: formatDate(request.end_date),
+        formattedEmission: formatLongDate(emissionDate)
+      }
+    }
+
+    // Crear contenedor temporal
+    // ESTRATEGIA FIX: No usar coordenadas negativas lejanas ni display none.
+    // Usar fixed en pantalla pero detrás de todo (z-index negativo) para asegurar renderizado.
+    const container = document.createElement('div')
+    container.style.position = 'fixed'
+    container.style.left = '0'
+    container.style.top = '0'
+    container.style.zIndex = '-9999' // Detrás de todo
+    container.style.width = '210mm'
+    container.style.minHeight = '297mm'
+    container.style.backgroundColor = '#ffffff'
+    document.body.appendChild(container)
+
+    // Renderizar template
+    const root = createRoot(container)
+    
+    // Renderizamos DOS copias (Empresa y Empleado) como en la vista de impresión
+    root.render(
+      <div className="p-[5mm] text-black bg-white w-full h-full" style={{ color: 'black', background: 'white' }}>
+        <PapeletaTemplate data={renderData} copyType="EMPRESA" />
+        <div className="w-full border-b-2 border-dashed border-gray-300 my-4" style={{ borderColor: '#d1d5db', borderBottomWidth: '2px', borderStyle: 'dashed', margin: '1rem 0' }} />
+        <PapeletaTemplate data={renderData} copyType="EMPLEADO" />
+      </div>
+    )
+
+    // AUMENTAR TIEMPO DE ESPERA para asegurar renderizado completo
+    await new Promise(resolve => setTimeout(resolve, 1500))
+
+    // Configurar html2pdf con método "limpio" (sin estilos computados complejos)
+    const opt = {
+      margin: 10,
+      filename: `Papeleta_${employeeDni}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { 
+        scale: 2,
+        useCORS: true,
+        // IMPORTANTE: Permitir logging para depurar si sigue blanco
+        logging: true,
+        // Asegurar fondo blanco explícito
+        backgroundColor: '#ffffff'
+      },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }
+
+    try {
+      // SOLUCIÓN DEFINITIVA OKLCH: 
+      // Si html2pdf falla, usamos un fallback manual o evitamos estilos conflictivos
+      // El error oklch viene de Tailwind en navegadores modernos.
+      // Vamos a "limpiar" el contenedor antes de pasarlo a html2pdf
+      
+      // Opción: Inyectar estilos explícitos para sobreescribir variables CSS globales
+      container.style.color = '#000000';
+      container.style.backgroundColor = '#ffffff';
+
+      // HACK DEFINITIVO PARA OKLCH:
+      // El problema es que Tailwind v4 usa 'oklch' en sus variables CSS por defecto.
+      // html2canvas intenta leer todas las reglas CSS y falla al parsear 'oklch'.
+      // Solución: Usar un iframe limpio sin el CSS global de Tailwind, e inyectar solo los estilos necesarios.
+      // O MÁS FÁCIL: Inyectar un estilo que redefina los colores problemáticos a valores seguros antes de generar.
+      
+      const stylePatch = document.createElement('style');
+      stylePatch.innerHTML = `
+        * { 
+          border-color: #e5e7eb !important; 
+          --tw-border-opacity: 1 !important;
+        }
+      `;
+      container.appendChild(stylePatch);
+
+      // Desactivar temporalmente la lectura de hojas de estilo externas si es posible
+      // html2canvas options: { logging: false, removeContainer: false }
+      
+      // Generar Blob
+      const pdfBlob = await html2pdf().set(opt).from(container).output('blob')
+      
+      // Limpiar
+      root.unmount()
+      document.body.removeChild(container)
+
+      // Subir a Supabase Storage
+      const fileName = `papeletas/${employeeDni}_${request.id}_${Date.now()}.pdf`
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('papeletas') // Asegúrate de crear este bucket en Supabase
+        .upload(fileName, pdfBlob, {
+          contentType: 'application/pdf',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      // Obtener URL Pública
+      const { data: publicUrlData } = supabase.storage
+        .from('papeletas')
+        .getPublicUrl(fileName)
+
+      return publicUrlData.publicUrl
+
+    } catch (error) {
+       console.error("Error fatal generando PDF:", error);
+       // Limpiar en caso de error si no se limpió antes
+       if (document.body.contains(container)) {
+         root.unmount();
+         document.body.removeChild(container);
+       }
+       throw error;
+    }
+  }
+
+  const handleStatusChange = async (id, newStatus) => {
+    if (!confirm(`¿Estás seguro de cambiar el estado a ${newStatus}?`)) return
+
+    setProcessingId(id)
+    try {
+      let pdfUrl = null;
+
+      // Si se APRUEBA, generamos el PDF primero
+      if (newStatus === 'APROBADO') {
+        const request = requests.find(r => r.id === id)
+        if (request) {
+          try {
+            pdfUrl = await generateAndUploadPDF(request)
+          } catch (err) {
+            console.error('Error generando PDF:', err)
+            alert('Error generando el PDF, pero se intentará aprobar. ' + err.message)
+          }
+        }
+      }
+
+      // Actualizar estado y URL en BD
+      // Nota: updateRequestStatus debe aceptar un objeto extra o modificarse
+      const { error } = await supabase
+        .from('vacation_requests')
+        .update({ 
+          status: newStatus,
+          validated_by: user?.id,
+          validated_at: new Date().toISOString(),
+          pdf_url: pdfUrl // Guardamos la URL generada
+        })
+        .eq('id', id)
+      
+      if (error) throw error
+
+      // Actualizar localmente
+      setRequests(prev => prev.map(req => 
+        req.id === id ? { ...req, status: newStatus, pdf_url: pdfUrl } : req
+      ))
+
+    } catch (error) {
+      console.error(error)
+      alert('Error al actualizar el estado: ' + error.message)
+    } finally {
+      setProcessingId(null)
+    }
   }
 
   const getStatusBadge = (status) => {
@@ -165,14 +373,37 @@ export default function RequestsList() {
                       {getStatusBadge(req.status)}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => navigate(`/papeleta/${req.id}`)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-blue-300 hover:text-blue-600 transition-all text-sm font-medium shadow-sm"
-                        title="Ver Papeleta"
-                      >
-                        <Printer size={16} />
-                        <span className="hidden sm:inline">Papeleta</span>
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        {req.status === 'PENDIENTE' && (
+                          <>
+                            <button
+                              onClick={() => handleStatusChange(req.id, 'APROBADO')}
+                              disabled={processingId === req.id}
+                              className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors"
+                              title="Aprobar"
+                            >
+                              <ThumbsUp size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleStatusChange(req.id, 'RECHAZADO')}
+                              disabled={processingId === req.id}
+                              className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                              title="Rechazar"
+                            >
+                              <ThumbsDown size={16} />
+                            </button>
+                          </>
+                        )}
+                        
+                        <button 
+                          onClick={() => navigate(`/papeleta/${req.id}`)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-blue-300 hover:text-blue-600 transition-all text-sm font-medium shadow-sm"
+                          title="Ver Papeleta"
+                        >
+                          <Printer size={16} />
+                          <span className="hidden sm:inline">Papeleta</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

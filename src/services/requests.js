@@ -25,6 +25,28 @@ export const getPapeletaById = async (id) => {
   }
 }
 
+export const updateRequestStatus = async (id, status, userId) => {
+  try {
+    const updateData = { 
+      status: status,
+      validated_by: userId,
+      validated_at: new Date().toISOString() // Ahora sí guardamos la fecha
+    }
+
+    const { data, error } = await supabase
+      .from('vacation_requests')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+
+    if (error) throw error
+    return { data, error: null }
+  } catch (error) {
+    console.error('Error updating request status:', error)
+    return { data: null, error }
+  }
+}
+
 export const getRequests = async () => {
   try {
     console.log('Fetching requests...')

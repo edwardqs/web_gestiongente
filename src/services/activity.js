@@ -118,7 +118,7 @@ const fetchAndCallback = async (record, callback, isRequest) => {
     try {
         const { data: employeeData, error } = await supabase
         .from('employees')
-        .select('full_name, profile_picture_url, position')
+        .select('full_name, profile_picture_url, position, email')
         .eq('id', record.employee_id)
         .single()
         

@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+/* 
+  FIX: Forzar el uso de colores RGB heredados para evitar conflicto con html2pdf
+  y el espacio de color oklch de Tailwind v4 
+*/
+@layer base {
+  :root {
+    --color-white: #ffffff;
+    --color-black: #000000;
+  }
+}
