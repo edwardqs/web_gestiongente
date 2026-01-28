@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getRequests, updateRequestStatus } from '../services/requests'
+import { getRequests } from '../services/requests'
 import { useAuth } from '../context/AuthContext'
-import { createRoot } from 'react-dom/client'
-import { PapeletaTemplate } from '../components/PapeletaTemplate'
-import html2pdf from 'html2pdf.js'
+import * as html2pdfPkg from 'html2pdf.js'
 import { supabase } from '../lib/supabase'
+
+const html2pdf = html2pdfPkg.default || html2pdfPkg
 import { 
   FileText, 
   Search, 
@@ -18,7 +18,7 @@ import {
   ThumbsDown
 } from 'lucide-react'
 
-// --- FUNCIONES DE FORMATEO PARA PDF ---
+// --- FUNCIONES DE FORMATEO ---
 const formatDate = (dateString) => {
   if (!dateString) return '26/01/2026'
   const date = new Date(dateString + 'T00:00:00')
@@ -52,7 +52,7 @@ export default function RequestsList() {
     setLoading(false)
   }
 
-  // --- FUNCIÓN GENERAR Y SUBIR PDF ---
+  // --- FUNCIÓN GENERAR Y SUBIR PDF (VERSIÓN ROBUSTA IFRAME) ---
   const generateAndUploadPDF = async (request) => {
     const employee = request.employees || {}
     const employeeName = (employee.full_name || '').toUpperCase()
@@ -86,89 +86,48 @@ export default function RequestsList() {
       }
     }
 
-    // Crear contenedor temporal
-    // ESTRATEGIA FIX: No usar coordenadas negativas lejanas ni display none.
-    // Usar fixed en pantalla pero detrás de todo (z-index negativo) para asegurar renderizado.
-    const container = document.createElement('div')
-    container.style.position = 'fixed'
-    container.style.left = '0'
-    container.style.top = '0'
-    container.style.zIndex = '-9999' // Detrás de todo
-    container.style.width = '210mm'
-    container.style.minHeight = '297mm'
-    container.style.backgroundColor = '#ffffff'
-    document.body.appendChild(container)
+    // 1. Crear contenedor IFRAME aislado para evitar conflictos CSS
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '0';
+    iframe.style.top = '0';
+    iframe.style.width = '210mm';
+    iframe.style.minHeight = '297mm';
+    iframe.style.zIndex = '-9999';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
 
-    // Renderizar template
-    const root = createRoot(container)
-    
-    // Renderizamos DOS copias (Empresa y Empleado) como en la vista de impresión
-    root.render(
-      <div className="p-[5mm] text-black bg-white w-full h-full" style={{ color: 'black', background: 'white' }}>
-        <PapeletaTemplate data={renderData} copyType="EMPRESA" />
-        <div className="w-full border-b-2 border-dashed border-gray-300 my-4" style={{ borderColor: '#d1d5db', borderBottomWidth: '2px', borderStyle: 'dashed', margin: '1rem 0' }} />
-        <PapeletaTemplate data={renderData} copyType="EMPLEADO" />
-      </div>
-    )
+    // 2. Escribir HTML puro en el iframe
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(generatePapeletaHTML(renderData));
+    doc.close();
 
-    // AUMENTAR TIEMPO DE ESPERA para asegurar renderizado completo
-    await new Promise(resolve => setTimeout(resolve, 1500))
-
-    // Configurar html2pdf con método "limpio" (sin estilos computados complejos)
-    const opt = {
-      margin: 10,
-      filename: `Papeleta_${employeeDni}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { 
-        scale: 2,
-        useCORS: true,
-        // IMPORTANTE: Permitir logging para depurar si sigue blanco
-        logging: true,
-        // Asegurar fondo blanco explícito
-        backgroundColor: '#ffffff'
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    }
+    // 3. Esperar carga de recursos (imágenes, fuentes)
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     try {
-      // SOLUCIÓN DEFINITIVA OKLCH: 
-      // Si html2pdf falla, usamos un fallback manual o evitamos estilos conflictivos
-      // El error oklch viene de Tailwind en navegadores modernos.
-      // Vamos a "limpiar" el contenedor antes de pasarlo a html2pdf
-      
-      // Opción: Inyectar estilos explícitos para sobreescribir variables CSS globales
-      container.style.color = '#000000';
-      container.style.backgroundColor = '#ffffff';
+      // 4. Configurar html2pdf
+      const opt = {
+        margin: 10,
+        filename: `Papeleta_${employeeDni}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+          scale: 2,
+          useCORS: true,
+          logging: true,
+          windowWidth: 794, // A4 width in px at 96dpi approx
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      }
 
-      // HACK DEFINITIVO PARA OKLCH:
-      // El problema es que Tailwind v4 usa 'oklch' en sus variables CSS por defecto.
-      // html2canvas intenta leer todas las reglas CSS y falla al parsear 'oklch'.
-      // Solución: Usar un iframe limpio sin el CSS global de Tailwind, e inyectar solo los estilos necesarios.
-      // O MÁS FÁCIL: Inyectar un estilo que redefina los colores problemáticos a valores seguros antes de generar.
-      
-      const stylePatch = document.createElement('style');
-      stylePatch.innerHTML = `
-        * { 
-          border-color: #e5e7eb !important; 
-          --tw-border-opacity: 1 !important;
-        }
-      `;
-      container.appendChild(stylePatch);
+      // 5. Generar desde el BODY del iframe
+      const pdfBlob = await html2pdf().set(opt).from(doc.body).output('blob');
 
-      // Desactivar temporalmente la lectura de hojas de estilo externas si es posible
-      // html2canvas options: { logging: false, removeContainer: false }
-      
-      // Generar Blob
-      const pdfBlob = await html2pdf().set(opt).from(container).output('blob')
-      
-      // Limpiar
-      root.unmount()
-      document.body.removeChild(container)
-
-      // Subir a Supabase Storage
+      // 6. Subir a Supabase
       const fileName = `papeletas/${employeeDni}_${request.id}_${Date.now()}.pdf`
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('papeletas') // Asegúrate de crear este bucket en Supabase
+        .from('papeletas')
         .upload(fileName, pdfBlob, {
           contentType: 'application/pdf',
           upsert: false
@@ -176,7 +135,7 @@ export default function RequestsList() {
 
       if (uploadError) throw uploadError
 
-      // Obtener URL Pública
+      // 7. Obtener URL
       const { data: publicUrlData } = supabase.storage
         .from('papeletas')
         .getPublicUrl(fileName)
@@ -185,13 +144,159 @@ export default function RequestsList() {
 
     } catch (error) {
        console.error("Error fatal generando PDF:", error);
-       // Limpiar en caso de error si no se limpió antes
-       if (document.body.contains(container)) {
-         root.unmount();
-         document.body.removeChild(container);
-       }
        throw error;
+    } finally {
+       // Limpiar siempre
+       if (document.body.contains(iframe)) {
+         document.body.removeChild(iframe);
+       }
     }
+  }
+
+  // Helper para generar HTML string (Sin dependencias de React)
+  const generatePapeletaHTML = (data) => {
+    const { employer, employee, flags, dates } = data;
+    
+    // Estilos CSS Inline para asegurar renderizado exacto
+    const styles = `
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: white; color: black; }
+        .container { border: 3px solid black; background: white; width: 100%; max-width: 800px; margin: 0 auto; }
+        .header { border-bottom: 3px solid black; padding: 5px; text-align: center; background: #f9fafb; }
+        .title { font-size: 20px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; margin: 0; }
+        
+        .section { display: flex; border-bottom: 2px solid black; }
+        .letter-box { width: 40px; border-right: 2px solid black; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 24px; }
+        .content { flex: 1; }
+        
+        .row { display: flex; border-bottom: 1px solid black; }
+        .row:last-child { border-bottom: none; }
+        
+        .label { width: 100px; padding: 4px; font-weight: bold; border-right: 1px solid black; font-size: 11px; display: flex; align-items: center; }
+        .value { padding: 4px; font-weight: bold; color: #1e40af; font-size: 11px; flex: 1; }
+        
+        .sub-row { width: 50%; display: flex; border-right: 1px solid black; }
+        .sub-row:last-child { border-right: none; }
+        .sub-label { width: 60px; padding: 4px; font-weight: bold; border-right: 1px solid black; font-size: 10px; }
+        .sub-value { padding: 4px; font-size: 10px; }
+        
+        .date-box { display: flex; align-items: center; gap: 10px; }
+        .date-label { font-size: 9px; font-weight: bold; color: #2563eb; text-align: right; line-height: 1.1; }
+        .date-value { border: 2px solid black; padding: 4px 12px; font-size: 16px; font-weight: 900; background: white; }
+        
+        .check-group { display: flex; justify-content: space-between; padding: 5px 20px; }
+        .check-item { display: flex; align-items: center; gap: 5px; }
+        .check-label { font-weight: bold; font-size: 10px; }
+        .check-box { width: 16px; height: 16px; border: 1px solid black; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 12px; }
+        
+        .footer-info { padding: 10px 20px; }
+        .date-line { font-weight: bold; font-size: 10px; text-transform: uppercase; margin-bottom: 20px; }
+        
+        .signatures { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-bottom: 10px; }
+        .sig-block { flex: 1; text-align: center; }
+        .sig-line { border-top: 1px dotted black; padding-top: 4px; }
+        .sig-name { font-weight: bold; font-size: 9px; margin: 0; }
+        .sig-dni { font-size: 8px; margin: 0; }
+        
+        .fingerprint { border: 1px solid black; width: 60px; height: 80px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px; background: white; }
+        .fp-label { font-size: 6px; color: #9ca3af; }
+        .fp-circle { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #e5e7eb; }
+        
+        .page-footer { border-top: 3px solid black; height: 30px; display: flex; align-items: center; }
+        .brand { flex: 1; padding: 0 20px; display: flex; align-items: center; gap: 10px; }
+        .brand-text { font-size: 12px; font-weight: 900; }
+        .brand-sub { font-size: 8px; font-weight: bold; color: #6b7280; }
+        .copy-type { border-left: 3px solid black; padding: 0 20px; height: 100%; display: flex; align-items: center; background: #f3f4f6; font-size: 9px; font-weight: 900; font-style: italic; text-transform: uppercase; }
+        
+        .divider { width: 100%; border-bottom: 2px dashed #d1d5db; margin: 20px 0; }
+      </style>
+    `;
+
+    // Template para una copia
+    const renderCopy = (type) => `
+      <div class="container">
+        <div class="header"><h1 class="title">PAPELETA DE VACACIONES</h1></div>
+        
+        <!-- A -->
+        <div class="section">
+          <div class="letter-box">A</div>
+          <div class="content">
+            <div class="row"><div class="label">EL EMPLEADOR</div><div class="value">${employer.nombre}</div></div>
+            <div class="row">
+              <div class="sub-row"><div class="sub-label">con RUC</div><div class="sub-value">${employer.ruc}</div></div>
+              <div class="sub-row" style="flex:1"><div class="sub-label">Domicilio</div><div class="sub-value" style="font-size:8px">${employer.domicilio}</div></div>
+            </div>
+            <div class="row" style="border:none"><div class="label">Representante</div><div class="value" style="color:black; font-weight:normal; font-size:10px">${employer.representante} (DNI: ${employer.dni_representante})</div></div>
+          </div>
+        </div>
+
+        <!-- B -->
+        <div class="section">
+          <div class="letter-box">B</div>
+          <div class="content">
+            <div class="row"><div class="label">EL TRABAJADOR</div><div class="value">${employee.name}</div></div>
+            <div class="row">
+              <div class="sub-row"><div class="sub-label">DNI Nº</div><div class="value">${employee.dni}</div></div>
+              <div class="sub-row" style="flex:1"><div class="sub-label">CARGO</div><div class="value" style="color:black">${employee.position}</div></div>
+            </div>
+            <div class="row" style="justify-content: space-around; padding: 8px; border:none">
+              <div class="date-box">
+                <div class="date-label">FECHA DE<br>SALIDA</div>
+                <div class="date-value">${dates.formattedStart}</div>
+              </div>
+              <div class="date-box">
+                <div class="date-label">FECHA DE<br>RETORNO</div>
+                <div class="date-value">${dates.formattedEnd}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- C -->
+        <div class="section">
+          <div class="letter-box">C</div>
+          <div class="content">
+            <div class="row" style="background:#f9fafb"><div class="label">MOTIVO</div><div class="value" style="color:#6b7280; font-weight:normal; font-style:italic">Seleccione el tipo</div></div>
+            <div class="check-group">
+              <div class="check-item"><span class="check-label">PERSONALES</span><div class="check-box">${flags.isPersonal ? 'X' : ''}</div></div>
+              <div class="check-item"><span class="check-label">SALUD</span><div class="check-box">${flags.isSalud ? 'X' : ''}</div></div>
+              <div class="check-item"><span class="check-label">VACACIONES</span><div class="check-box">${flags.isVacaciones ? 'X' : ''}</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer-info">
+          <div class="date-line">${employee.sede}, ${dates.formattedEmission}</div>
+          <div class="signatures">
+            <div class="sig-block"><div style="height:30px"></div><div class="sig-line"><p class="sig-name">${employer.representante}</p><p class="sig-dni">DNI: ${employer.dni_representante}</p></div></div>
+            <div class="sig-block"><div style="height:30px"></div><div class="sig-line"><p class="sig-name" style="color:#1e3a8a">${employee.name}</p><p class="sig-dni">DNI: ${employee.dni}</p></div></div>
+            <div class="fingerprint">
+              <span class="fp-label">HUELLA</span>
+              <div class="fp-circle"></div>
+              <span class="fp-label" style="text-align:center">INDICE DERECHO</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="page-footer">
+          <div class="brand"><span class="brand-text">PAUSER</span><span style="color:#9ca3af">|</span><span class="brand-sub">RECURSOS HUMANOS</span></div>
+          <div class="copy-type">COPIA ${type}</div>
+        </div>
+      </div>
+    `;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>${styles}</head>
+      <body>
+        ${renderCopy('EMPRESA')}
+        <div class="divider"></div>
+        ${renderCopy('EMPLEADO')}
+      </body>
+      </html>
+    `;
   }
 
   const handleStatusChange = async (id, newStatus) => {
@@ -215,7 +320,6 @@ export default function RequestsList() {
       }
 
       // Actualizar estado y URL en BD
-      // Nota: updateRequestStatus debe aceptar un objeto extra o modificarse
       const { error } = await supabase
         .from('vacation_requests')
         .update({ 

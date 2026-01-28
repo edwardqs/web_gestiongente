@@ -3,7 +3,9 @@ import { useParams } from 'react-router-dom'
 import { getPapeletaById } from '../services/requests'
 import { Printer, Mail, Send } from 'lucide-react'
 import pauserLogo from '../assets/pauser_logo.png'
-import html2pdf from 'html2pdf.js'
+import * as html2pdfPkg from 'html2pdf.js'
+
+const html2pdf = html2pdfPkg.default || html2pdfPkg
 
 const formatDate = (dateString) => {
   if (!dateString) return '26/01/2026'

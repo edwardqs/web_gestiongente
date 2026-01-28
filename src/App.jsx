@@ -1,5 +1,5 @@
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import RegisterEmployee from './pages/RegisterEmployee'
@@ -33,7 +33,7 @@ const PrivateRoute = ({ children }) => {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
 
@@ -101,7 +101,7 @@ function App() {
           {/* Redirigir cualquier otra ruta a home */}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
-      </BrowserRouter>
+      </Router>
     </AuthProvider>
   )
 }
