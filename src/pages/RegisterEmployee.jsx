@@ -191,6 +191,9 @@ export default function RegisterEmployee() {
         ...formData,
         role_id: null // Forzamos null en role_id para evitar conflictos de Foreign Key con la tabla 'roles'
       }
+      
+      // Eliminar employee_type si existe, ya que no es columna de employees (está en job_positions)
+      delete dataToSave.employee_type
 
       if (isEditing) {
         await updateEmployee(id, dataToSave)
