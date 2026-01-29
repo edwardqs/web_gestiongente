@@ -27,17 +27,17 @@ export default function RegisterEmployee() {
     business_unit: initialBusiness,
     location_id: null,
     department_id: null,
-    employee_type: '', 
     dni: '',
     full_name: '',
     entry_date: '',
     position: '',
     job_position_id: null,
-    role_id: '', // Mantenemos role_id como job_position_id por compatibilidad
+    role_id: '', // Mantenemos role_id como job_position_id por compatibilidad, pero en UI se usa como select value
     phone: '',
     email: '',
     birth_date: '',
-    address: ''
+    address: '',
+    employee_type: ''
   })
 
   // 1. Cargar Sedes (Locations) al inicio
@@ -166,8 +166,8 @@ export default function RegisterEmployee() {
        const selectedPos = positionsList.find(r => r.id.toString() === value)
        setFormData(prev => ({
            ...prev,
-           role_id: value,
-           job_position_id: value, // Guardamos ID
+           role_id: value, // Guardamos value en role_id TEMPORALMENTE para que el Select refleje la selección visualmente
+           job_position_id: value, // Guardamos ID del cargo real
            position: selectedPos ? selectedPos.name : '', // Guardamos Nombre
            employee_type: selectedPos ? selectedPos.employee_type : '' // Auto-asignar tipo
        }))
@@ -187,34 +187,26 @@ export default function RegisterEmployee() {
     setSuccess(false)
 
     try {
-      if (isEditing) {
-        const { error } = await updateEmployee(id, formData)
-        if (error) throw error
-        setSuccess(true)
-        setTimeout(() => navigate(-1), 1500)
-      } else {
-        const { error } = await createEmployee(formData)
-        if (error) throw error
-        setSuccess(true)
-        
-        // Limpiar form pero mantener sede/negocio
-        setFormData(prev => ({
-          ...prev,
-          dni: '',
-          full_name: '',
-          entry_date: '',
-          position: '',
-          job_position_id: null,
-          role_id: '',
-          phone: '',
-          email: '',
-          birth_date: '',
-          address: ''
-        }))
-        setTimeout(() => setSuccess(false), 3000)
+      const dataToSave = {
+        ...formData,
+        role_id: null // Forzamos null en role_id para evitar conflictos de Foreign Key con la tabla 'roles'
       }
 
+      if (isEditing) {
+        await updateEmployee(id, dataToSave)
+        setSuccess(true)
+      } else {
+        await createEmployee(dataToSave)
+        setSuccess(true)
+        // Reset form (opcional)
+        setFormData({
+            ...formData,
+            dni: '', full_name: '', phone: '', email: '', 
+            position: '', job_position_id: null, role_id: null
+        })
+      }
     } catch (err) {
+      console.error(err)
       setError(err.message || 'Error al guardar empleado')
     } finally {
       setLoading(false)
@@ -348,7 +340,7 @@ export default function RegisterEmployee() {
               </label>
               <select
                 name="role_id"
-                value={formData.role_id}
+                value={formData.role_id || ''}
                 onChange={handleChange}
                 required
                 disabled={!formData.business_unit}

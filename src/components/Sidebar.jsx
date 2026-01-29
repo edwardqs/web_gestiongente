@@ -83,7 +83,8 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       label: 'Configuración', 
       href: '#',
       submenu: [
-        { label: 'Roles y Permisos', icon: Shield, href: '/roles' }
+        { label: 'Roles y Permisos', icon: Shield, href: '/roles' },
+        { label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' }
       ]
     },
   ]

@@ -5,8 +5,13 @@ export const createEmployee = async (employeeData) => {
     .from('employees')
     .insert([employeeData])
     .select()
+
+  if (error) {
+    console.error("Error creating employee in Supabase:", error)
+    throw error // Re-lanzar para que el catch del componente lo atrape
+  }
   
-  return { data, error }
+  return { data, error: null }
 }
 
 export const getEmployees = async () => {

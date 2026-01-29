@@ -31,7 +31,7 @@ export async function getDepartmentsByLocation(locationId) {
 export async function getPositionsByLocationAndDept(locationId, departmentId) {
   const { data, error } = await supabase
     .from('org_structure')
-    .select('job_position_id, job_positions (id, name, default_role_id, employee_type)')
+    .select('job_position_id, job_positions (id, name, default_role_id)')
     .eq('location_id', locationId)
     .eq('department_id', departmentId)
 
