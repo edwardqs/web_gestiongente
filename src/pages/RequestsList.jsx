@@ -6,12 +6,13 @@ import * as html2pdfPkg from 'html2pdf.js'
 import { supabase } from '../lib/supabase'
 
 const html2pdf = html2pdfPkg.default || html2pdfPkg
-import { 
-  FileText, 
-  Search, 
-  Printer, 
-  CheckCircle, 
-  XCircle, 
+
+import {
+  FileText,
+  Search,
+  Printer,
+  CheckCircle,
+  XCircle,
   Clock,
   RefreshCw,
   ThumbsUp,
@@ -112,7 +113,7 @@ export default function RequestsList() {
         margin: 10,
         filename: `Papeleta_${employeeDni}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { 
+        html2canvas: {
           scale: 2,
           useCORS: true,
           logging: true,
@@ -143,20 +144,20 @@ export default function RequestsList() {
       return publicUrlData.publicUrl
 
     } catch (error) {
-       console.error("Error fatal generando PDF:", error);
-       throw error;
+      console.error("Error fatal generando PDF:", error);
+      throw error;
     } finally {
-       // Limpiar siempre
-       if (document.body.contains(iframe)) {
-         document.body.removeChild(iframe);
-       }
+      // Limpiar siempre
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
     }
   }
 
   // Helper para generar HTML string (Sin dependencias de React)
   const generatePapeletaHTML = (data) => {
     const { employer, employee, flags, dates } = data;
-    
+
     // Estilos CSS Inline para asegurar renderizado exacto
     const styles = `
       <style>
@@ -322,18 +323,18 @@ export default function RequestsList() {
       // Actualizar estado y URL en BD
       const { error } = await supabase
         .from('vacation_requests')
-        .update({ 
+        .update({
           status: newStatus,
           validated_by: user?.id,
           validated_at: new Date().toISOString(),
           pdf_url: pdfUrl // Guardamos la URL generada
         })
         .eq('id', id)
-      
+
       if (error) throw error
 
       // Actualizar localmente
-      setRequests(prev => prev.map(req => 
+      setRequests(prev => prev.map(req =>
         req.id === id ? { ...req, status: newStatus, pdf_url: pdfUrl } : req
       ))
 
@@ -359,11 +360,11 @@ export default function RequestsList() {
   const filteredRequests = requests.filter(req => {
     const employeeName = req.employees?.full_name || 'Desconocido'
     const employeeDni = req.employees?.dni || ''
-    
-    const matchesSearch = 
+
+    const matchesSearch =
       employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       employeeDni.includes(searchTerm)
-    
+
     const matchesStatus = filterStatus === 'ALL' || req.status === filterStatus
 
     return matchesSearch && matchesStatus
@@ -382,7 +383,7 @@ export default function RequestsList() {
             Gestiona e imprime las papeletas de vacaciones y permisos
           </p>
         </div>
-        <button 
+        <button
           onClick={fetchRequests}
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium"
         >
@@ -395,7 +396,7 @@ export default function RequestsList() {
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 justify-between">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-          <input 
+          <input
             type="text"
             placeholder="Buscar por empleado o DNI..."
             value={searchTerm}
@@ -404,7 +405,7 @@ export default function RequestsList() {
           />
         </div>
         <div className="flex gap-2">
-          <select 
+          <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
             className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:border-blue-500"
@@ -498,8 +499,8 @@ export default function RequestsList() {
                             </button>
                           </>
                         )}
-                        
-                        <button 
+
+                        <button
                           onClick={() => navigate(`/papeleta/${req.id}`)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-blue-300 hover:text-blue-600 transition-all text-sm font-medium shadow-sm"
                           title="Ver Papeleta"
