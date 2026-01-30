@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -15,6 +15,7 @@ import DashboardLayout from './layouts/DashboardLayout'
 // Componente para proteger rutas privadas
 const PrivateRoute = ({ children }) => {
   const { session, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -25,7 +26,7 @@ const PrivateRoute = ({ children }) => {
   }
 
   if (!session) {
-    return <Navigate to="/login" />
+    return <Navigate to="/login" state={{ from: location }} replace />
   }
 
   return <DashboardLayout>{children}</DashboardLayout>

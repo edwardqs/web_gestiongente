@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { signInWithEmail } from '../services/auth'
 import { useAuth } from '../context/AuthContext'
 import { User, Lock, Eye, EyeOff } from 'lucide-react'
@@ -7,6 +7,7 @@ import bgImage from '../assets/imagen_pauser.jpg'
 
 export default function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { session } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -14,12 +15,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  // Redirección reactiva: Si ya hay sesión, ir al dashboard
+  const from = location.state?.from?.pathname || "/"
+
+  // Redirección reactiva: Si ya hay sesión, ir al dashboard o a la ruta original
   useEffect(() => {
     if (session) {
-      navigate('/', { replace: true })
+      navigate(from, { replace: true })
     }
-  }, [session, navigate])
+  }, [session, navigate, from])
 
   const handleLogin = async (e) => {
     e.preventDefault()
