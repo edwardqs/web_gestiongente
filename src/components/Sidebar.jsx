@@ -36,15 +36,16 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
   }
 
   const menuItems = [
-    { icon: Home, label: 'Inicio', href: '/' },
-    { icon: Users, label: 'Empleados', href: '#' }, // Podría llevar a /employees/all en el futuro
-    { icon: Clock, label: 'Asistencias', href: '/attendance-list' },
-    { icon: FileText, label: 'Solicitudes', href: '/requests' },
-    { icon: Calendar, label: 'Calendario', href: '/calendar' },
+    { icon: Home, label: 'Inicio', href: '/', module: 'dashboard' },
+    { icon: Users, label: 'Empleados', href: '#', module: 'employees' }, // Podría llevar a /employees/all en el futuro
+    { icon: Clock, label: 'Asistencias', href: '/attendance-list', module: 'attendance' },
+    { icon: FileText, label: 'Solicitudes', href: '/requests', module: 'requests' },
+    { icon: Calendar, label: 'Calendario', href: '/calendar', module: 'calendar' },
     {
       icon: Briefcase,
       label: 'Dptos / Sedes',
       href: '#',
+      module: 'departments',
       submenu: [
         { label: 'ADM. CENTRAL', icon: Building2, href: '/employees/adm-central' },
         {
@@ -77,17 +78,50 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         { label: 'Desaguadero', icon: MapPin, href: '/employees/desaguadero' },
       ]
     },
-    { icon: FileText, label: 'Documentos', href: '#' },
+    { icon: FileText, label: 'Documentos', href: '#', module: 'documents' }, // Module placeholder
     { 
       icon: Settings, 
       label: 'Configuración', 
       href: '#',
+      module: 'settings',
       submenu: [
         { label: 'Roles y Permisos', icon: Shield, href: '/roles' },
         { label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' }
       ]
     },
   ]
+
+  // Filtrado de Menú por RBAC
+  const visibleMenuItems = menuItems.reduce((acc, item) => {
+    // 1. Verificar si es Admin (Bypass)
+    const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN';
+    
+    // 2. Verificar permiso de lectura en el módulo
+    const hasModuleAccess = isAdmin || !item.module || (user?.permissions && user?.permissions[item.module]?.read);
+
+    if (!hasModuleAccess) return acc;
+
+    // 3. Lógica especial para 'departments' (Sedes): Filtrar submenú si no es Admin
+    if (item.module === 'departments' && !isAdmin && user?.sede) {
+        const newItem = { ...item };
+        if (newItem.submenu) {
+            // Filtrar submenu para mostrar SOLO la sede del usuario
+            // Normalizamos a mayúsculas para comparar
+            newItem.submenu = newItem.submenu.filter(sub => 
+                sub.label.toUpperCase() === user.sede.toUpperCase()
+            );
+        }
+        // Solo agregar si tiene items en el submenu (o si no tenía submenu originalmente)
+        if (!newItem.submenu || newItem.submenu.length > 0) {
+            acc.push(newItem);
+        }
+    } else {
+        // Caso normal (Admin o módulo sin restricción especial de contenido)
+        acc.push(item);
+    }
+    
+    return acc;
+  }, []);
 
   // Componente Recursivo para renderizar items
   const MenuItem = ({ item, level = 0 }) => {
@@ -197,7 +231,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
           {/* Menú de Navegación */}
           <nav className="flex-1 px-3 py-6 space-y-1">
-            {menuItems.map((item, index) => (
+            {visibleMenuItems.map((item, index) => (
               <MenuItem key={index} item={item} level={0} />
             ))}
           </nav>

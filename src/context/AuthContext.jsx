@@ -42,6 +42,9 @@ export const AuthProvider = ({ children }) => {
         setSession(session)
         // Cargar perfil del usuario si hay sesión
         if (session?.user) {
+             // Forzar loading true mientras se carga el perfil para evitar race conditions
+             setLoading(true);
+             
              // Llamar a fetchProfile para asegurar datos frescos y completos
              // Esto actualizará 'user' y pondrá 'loading' en false cuando termine
              fetchProfile(session.user);
@@ -56,6 +59,9 @@ export const AuthProvider = ({ children }) => {
   }, [])
 
   const fetchProfile = async (authUser) => {
+    // Si ya tenemos el usuario cargado y es el mismo, evitamos recargar (opcional, pero ayuda a la estabilidad)
+    // if (user && user.id === authUser.id) return; 
+
     try {
       console.log('Buscando perfil para:', authUser.email);
       
@@ -109,11 +115,39 @@ export const AuthProvider = ({ children }) => {
         }
 
         // Combinar datos de auth y empleado
+        const roleName = employeeData.roles?.name || employeeData.role || employeeData.employee_type;
+        
+        // Cargar permisos RBAC de módulos
+        let modulePermissions = {};
+        if (roleName) {
+            const { data: permsData } = await supabase
+                .from('role_modules')
+                .select('module_key, can_read, can_write, can_delete')
+                .eq('role_name', roleName);
+            
+            if (permsData && permsData.length > 0) {
+                modulePermissions = permsData.reduce((acc, curr) => {
+                    acc[curr.module_key] = {
+                        read: curr.can_read,
+                        write: curr.can_write,
+                        delete: curr.can_delete
+                    };
+                    return acc;
+                }, {});
+            } else if (roleName === 'ADMIN' || roleName === 'SUPER ADMIN') {
+                // Fallback para ADMIN si no hay registros en role_modules: Acceso total
+                modulePermissions = { 
+                    '*': { read: true, write: true, delete: true } 
+                };
+            }
+        }
+
         const finalUser = {
           ...authUser,
           employee_id: employeeData.id,
-          role: employeeData.roles?.name || employeeData.role || employeeData.employee_type, // Priorizar rol relacional
-          permissions: employeeData.roles || {}, // Permisos explícitos
+          role: roleName, // Priorizar rol relacional
+          role_details: employeeData.roles || {}, // Detalles del rol (tabla roles)
+          permissions: modulePermissions, // Permisos RBAC granular
           full_name: employeeData.full_name,
           position: employeeData.position,
           sede: employeeData.sede,

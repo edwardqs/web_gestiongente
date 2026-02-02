@@ -1,5 +1,6 @@
-﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
 import { getLocations, getDepartmentsByLocation, getPositionsByLocationAndDept } from '../services/structure'
 import { Save, User, Phone, Mail, MapPin, Briefcase, Calendar, FileText, Store, Users } from 'lucide-react'
@@ -8,7 +9,11 @@ export default function RegisterEmployee() {
   const navigate = useNavigate()
   const { id } = useParams() 
   const [searchParams] = useSearchParams()
+  const { user } = useAuth()
   const isEditing = Boolean(id) 
+
+  // Determinar si la sede debe estar bloqueada (No es Admin y tiene sede asignada)
+  const isSedeLocked = user?.sede && !['SUPER ADMIN', 'ADMIN'].includes(user?.role?.toUpperCase())
 
   const initialSede = searchParams.get('sede') || ''
   const initialBusiness = searchParams.get('business') || ''
@@ -39,6 +44,17 @@ export default function RegisterEmployee() {
     address: '',
     employee_type: ''
   })
+
+  // 0. Auto-asignar Sede para usuarios restringidos
+  useEffect(() => {
+    if (!isEditing && isSedeLocked && user?.sede && formData.sede !== user.sede) {
+        setFormData(prev => ({
+            ...prev,
+            sede: user.sede,
+            business_unit: '' // Resetear unidad de negocio para forzar selección válida
+        }))
+    }
+  }, [isEditing, isSedeLocked, user])
 
   // 1. Cargar Sedes (Locations) al inicio
   useEffect(() => {
@@ -257,7 +273,8 @@ export default function RegisterEmployee() {
                 value={formData.sede}
                 onChange={handleChange}
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50/50"
+                disabled={isSedeLocked}
+                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
               >
                 <option value="">Seleccione una sede</option>
                 {locationsList.map(loc => (

@@ -47,12 +47,30 @@ export const deleteRole = async (id) => {
 
 // --- GESTIÓN DE USUARIOS POR ROL ---
 
-export const getUsersByRole = async (roleId) => {
-  const { data, error } = await supabase
+export const getUsersByRole = async (roleId, roleName) => {
+  // 1. Intentar buscar por ID de rol (Relación directa FK)
+  let { data, error } = await supabase
     .from('employees')
-    .select('id, full_name, email, position, profile_picture_url')
+    .select('id, full_name, email, position, profile_picture_url, role_id')
     .eq('role_id', roleId)
     .order('full_name')
+
+  // 2. Si no hay resultados y tenemos nombre, buscar por coincidencia de texto en campos 'role' o 'position'
+  // Esto es un fallback por si la FK role_id es nula pero el texto coincide
+  if ((!data || data.length === 0) && roleName) {
+      // Usamos .or con ilike para mayor flexibilidad
+      const { data: dataByName, error: errorByName } = await supabase
+        .from('employees')
+        .select('id, full_name, email, position, profile_picture_url, role_id')
+        .or(`role.eq.${roleName},position.eq.${roleName}`) 
+        .order('full_name')
+      
+      if (dataByName && dataByName.length > 0) {
+          data = dataByName;
+          // Si encontramos por nombre, no consideramos el error anterior de ID
+          error = errorByName; 
+      }
+  }
   
   return { data, error }
 }

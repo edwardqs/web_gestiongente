@@ -44,7 +44,7 @@ export default function RolesManagement() {
 
   useEffect(() => {
     if (selectedRole) {
-      loadRoleUsers(selectedRole.id)
+      loadRoleUsers(selectedRole)
     } else {
       setRoleUsers([])
     }
@@ -62,9 +62,9 @@ export default function RolesManagement() {
     setLoading(false)
   }
 
-  const loadRoleUsers = async (roleId) => {
+  const loadRoleUsers = async (role) => {
     setLoadingUsers(true)
-    const { data, error } = await getUsersByRole(roleId)
+    const { data, error } = await getUsersByRole(role.id, role.name)
     if (!error) {
       setRoleUsers(data || [])
     } else {
@@ -127,7 +127,7 @@ export default function RolesManagement() {
 
     const { error } = await assignRoleToUser(userId, selectedRole.id)
     if (!error) {
-        loadRoleUsers(selectedRole.id)
+        loadRoleUsers(selectedRole)
         setSearchTerm('')
         setSearchResults([])
         alert('Usuario asignado correctamente')
@@ -300,7 +300,7 @@ export default function RolesManagement() {
                                             onChange={(e) => {
                                                 if (confirm(`¿Mover usuario a ${e.target.options[e.target.selectedIndex].text}?`)) {
                                                     assignRoleToUser(user.id, e.target.value).then(() => {
-                                                        loadRoleUsers(selectedRole.id) // Recargar lista actual
+                                                        loadRoleUsers(selectedRole) // Recargar lista actual
                                                     })
                                                 } else {
                                                     e.target.value = selectedRole.id // Revertir
