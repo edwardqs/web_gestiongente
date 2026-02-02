@@ -76,10 +76,7 @@ export const PapeletaTemplate = ({ data, copyType }) => {
       <div className="flex border-b-[2px] border-black">
         <div className="w-8 border-r-[2px] border-black flex items-center justify-center font-black text-xl">C</div>
         <div className="flex-1">
-          <div className="flex border-b border-black bg-gray-50" style={{ backgroundColor: '#f9fafb' }}>
-            <div className="w-24 p-1 font-bold border-r border-black text-[10px]">MOTIVO</div>
-            <div className="p-1 text-[8px] text-gray-500 italic flex-1" style={{ color: '#6b7280' }}>Seleccione el tipo</div>
-          </div>
+
           <div className="flex justify-between px-4 py-1">
             <div className="flex items-center gap-1">
               <span className="font-bold text-[9px]">PERSONALES</span>
