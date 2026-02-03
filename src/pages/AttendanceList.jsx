@@ -188,12 +188,10 @@ export default function AttendanceList() {
                 // Actualizamos el objeto stats local del componente (aunque el componente usa variable 'stats' derivada,
                 // necesitamos un estado para stats globales si queremos que sean precisos)
                 setGlobalStats({
-                    total: statsData.total_employees,
-                    onTime: statsData.on_time,
-                    late: statsData.late,
-                    absent: statsData.absent_registered + statsData.pending // Sumamos pendientes a ausencias como pidió el usuario?
-                    // O mejor mostramos pendientes aparte. El usuario dijo "iran descontando".
-                    // Si Total es fijo, y Puntual/Tarde suben, entonces Ausencia/Pendiente baja.
+                    total: Number(statsData.total_employees) || 0,
+                    onTime: Number(statsData.on_time) || 0,
+                    late: Number(statsData.late) || 0,
+                    absent: (Number(statsData.absent_registered) || 0) + (Number(statsData.pending) || 0)
                 })
             }
 
