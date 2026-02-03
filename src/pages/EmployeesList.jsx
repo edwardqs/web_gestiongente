@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { deleteEmployee } from '../services/employees'
+import { useToast } from '../context/ToastContext'
+import Modal from '../components/ui/Modal'
 import { 
   Search, 
   Download, 
@@ -20,9 +22,11 @@ export default function EmployeesList() {
   const businessUnit = searchParams.get('business')
   
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null })
 
   const sedeMap = {
     'adm-central': 'ADM. CENTRAL',
@@ -69,15 +73,26 @@ export default function EmployeesList() {
     }
   }
 
+  const openDeleteModal = (id) => {
+    setModalConfig({
+      isOpen: true,
+      title: 'Eliminar Empleado',
+      message: '¿Estás seguro de que deseas eliminar a este empleado? Esta acción no se puede deshacer.',
+      type: 'error',
+      confirmText: 'Eliminar',
+      onConfirm: () => handleDelete(id)
+    })
+  }
+
   const handleDelete = async (id) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar a este empleado? Esta acción no se puede deshacer.')) {
-      try {
-        const { error } = await deleteEmployee(id)
-        if (error) throw error
-        setEmployees(employees.filter(emp => emp.id !== id))
-      } catch (err) {
-        alert('Error al eliminar empleado: ' + err.message)
-      }
+    setModalConfig(prev => ({ ...prev, isOpen: false }))
+    try {
+      const { error } = await deleteEmployee(id)
+      if (error) throw error
+      setEmployees(employees.filter(emp => emp.id !== id))
+      showToast('Empleado eliminado correctamente', 'success')
+    } catch (err) {
+      showToast('Error al eliminar empleado: ' + err.message, 'error')
     }
   }
 
@@ -234,7 +249,7 @@ export default function EmployeesList() {
                           <Edit2 size={18} />
                         </button>
                         <button 
-                          onClick={() => handleDelete(emp.id)}
+                          onClick={() => openDeleteModal(emp.id)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           title="Eliminar"
                         >
@@ -249,6 +264,17 @@ export default function EmployeesList() {
           </table>
         </div>
       </div>
+
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+        confirmText={modalConfig.confirmText}
+        onConfirm={modalConfig.onConfirm}
+        showCancel
+      />
     </div>
   )
 }

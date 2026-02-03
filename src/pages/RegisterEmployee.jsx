@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
@@ -12,8 +12,10 @@ export default function RegisterEmployee() {
   const { user } = useAuth()
   const isEditing = Boolean(id) 
 
-  // Determinar si la sede debe estar bloqueada (No es Admin y tiene sede asignada)
-  const isSedeLocked = user?.sede && !['SUPER ADMIN', 'ADMIN'].includes(user?.role?.toUpperCase())
+  // Determinar si la sede debe estar bloqueada (No es Admin, no tiene permiso global y tiene sede asignada)
+  const isSedeLocked = user?.sede && 
+    !['SUPER ADMIN', 'ADMIN'].includes(user?.role?.toUpperCase()) && 
+    !(user?.permissions && user?.permissions['*'])
 
   const initialSede = searchParams.get('sede') || ''
   const initialBusiness = searchParams.get('business') || ''
@@ -21,6 +23,7 @@ export default function RegisterEmployee() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState(null)
+  const [errors, setErrors] = useState({}) // Estado para errores de validación
   
   // Listas dinámicas
   const [locationsList, setLocationsList] = useState([])
@@ -44,6 +47,58 @@ export default function RegisterEmployee() {
     address: '',
     employee_type: ''
   })
+
+  // Función de validación
+  const validateForm = () => {
+    const newErrors = {}
+    
+    if (!formData.sede) newErrors.sede = 'La sede es obligatoria'
+    if (!formData.business_unit) newErrors.business_unit = 'La unidad de negocio es obligatoria'
+    
+    if (!formData.dni) {
+      newErrors.dni = 'El DNI es obligatorio'
+    } else if (!/^\d{8}$/.test(formData.dni)) {
+      newErrors.dni = 'El DNI debe tener 8 dígitos numéricos'
+    }
+
+    if (!formData.full_name) {
+      newErrors.full_name = 'El nombre completo es obligatorio'
+    } else if (formData.full_name.length < 5) {
+      newErrors.full_name = 'El nombre debe tener al menos 5 caracteres'
+    }
+
+    if (!formData.entry_date) newErrors.entry_date = 'La fecha de ingreso es obligatoria'
+    
+    if (!formData.role_id) newErrors.role_id = 'El puesto es obligatorio'
+
+    if (!formData.phone) {
+      newErrors.phone = 'El celular es obligatorio'
+    } else if (!/^\d{9}$/.test(formData.phone)) {
+      newErrors.phone = 'El celular debe tener 9 dígitos'
+    }
+
+    if (!formData.email) {
+      newErrors.email = 'El correo es obligatorio'
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = 'El formato del correo no es válido'
+    }
+
+    if (!formData.birth_date) {
+        newErrors.birth_date = 'La fecha de nacimiento es obligatoria'
+    } else {
+        const birth = new Date(formData.birth_date)
+        const ageDifMs = Date.now() - birth.getTime()
+        const ageDate = new Date(ageDifMs) 
+        if (Math.abs(ageDate.getUTCFullYear() - 1970) < 18) {
+             newErrors.birth_date = 'El empleado debe ser mayor de 18 años'
+        }
+    }
+
+    if (!formData.address) newErrors.address = 'La dirección es obligatoria'
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
 
   // 0. Auto-asignar Sede para usuarios restringidos
   useEffect(() => {
@@ -154,6 +209,11 @@ export default function RegisterEmployee() {
   const handleChange = (e) => {
     const { name, value } = e.target
     
+    // Clear error when user types
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: null }))
+    }
+    
     if (name === 'sede') {
       // Buscar ID de la sede seleccionada
       const selectedLoc = locationsList.find(l => l.name === value)
@@ -198,6 +258,11 @@ export default function RegisterEmployee() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    
+    if (!validateForm()) {
+        return
+    }
+
     setLoading(true)
     setError(null)
     setSuccess(false)
@@ -274,13 +339,14 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 required
                 disabled={isSedeLocked}
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed ${errors.sede ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               >
                 <option value="">Seleccione una sede</option>
                 {locationsList.map(loc => (
                   <option key={loc.id} value={loc.name}>{loc.name}</option>
                 ))}
               </select>
+              {errors.sede && <p className="text-red-500 text-xs mt-1">{errors.sede}</p>}
             </div>
 
             {/* Unidad de Negocio (Dinámica) */}
@@ -294,13 +360,14 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 required
                 disabled={!formData.sede}
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-400"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-400 ${errors.business_unit ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               >
                 <option value="">Seleccione negocio</option>
                 {departmentsList.map(dept => (
                   <option key={dept.id} value={dept.name}>{dept.name}</option>
                 ))}
               </select>
+              {errors.business_unit && <p className="text-red-500 text-xs mt-1">{errors.business_unit}</p>}
             </div>
 
 
@@ -318,8 +385,9 @@ export default function RegisterEmployee() {
                 pattern="\d{8}"
                 placeholder="12345678"
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.dni ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.dni && <p className="text-red-500 text-xs mt-1">{errors.dni}</p>}
             </div>
 
             {/* Apellidos y Nombres */}
@@ -334,8 +402,9 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 placeholder="PEREZ LOPEZ JUAN CARLOS"
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all uppercase"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all uppercase ${errors.full_name ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.full_name && <p className="text-red-500 text-xs mt-1">{errors.full_name}</p>}
             </div>
 
             {/* Fecha de Ingreso */}
@@ -349,8 +418,9 @@ export default function RegisterEmployee() {
                 value={formData.entry_date}
                 onChange={handleChange}
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.entry_date ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.entry_date && <p className="text-red-500 text-xs mt-1">{errors.entry_date}</p>}
             </div>
 
             {/* Puesto (Seleccionable Dinámicamente) */}
@@ -364,7 +434,7 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 required
                 disabled={!formData.business_unit}
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-400"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all bg-gray-50/50 disabled:bg-gray-100 disabled:text-gray-400 ${errors.role_id ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               >
                 <option value="">Seleccione un puesto</option>
                 {positionsList.map(pos => (
@@ -372,6 +442,7 @@ export default function RegisterEmployee() {
                 ))}
               </select>
               <input type="hidden" name="position" value={formData.position} />
+              {errors.role_id && <p className="text-red-500 text-xs mt-1">{errors.role_id}</p>}
             </div>
 
             {/* Celular */}
@@ -386,8 +457,9 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 placeholder="999888777"
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.phone ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
             </div>
 
             {/* Correo Corporativo */}
@@ -402,8 +474,9 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 placeholder="usuario@pauserdistribuciones.com"
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.email ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
             </div>
 
             {/* Cumpleaños */}
@@ -417,8 +490,9 @@ export default function RegisterEmployee() {
                 value={formData.birth_date}
                 onChange={handleChange}
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.birth_date ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.birth_date && <p className="text-red-500 text-xs mt-1">{errors.birth_date}</p>}
             </div>
 
             {/* Dirección */}
@@ -433,8 +507,9 @@ export default function RegisterEmployee() {
                 onChange={handleChange}
                 placeholder="Calle, Número, Distrito, Provincia"
                 required
-                className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all uppercase"
+                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all uppercase ${errors.address ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
               />
+              {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address}</p>}
             </div>
 
           </div>

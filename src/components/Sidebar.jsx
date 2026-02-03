@@ -76,6 +76,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         { label: 'Chincha', icon: MapPin, href: '/employees/chincha' },
         { label: 'Ica', icon: MapPin, href: '/employees/ica' },
         { label: 'Desaguadero', icon: MapPin, href: '/employees/desaguadero' },
+        { label: 'Lima', icon: MapPin, href: '/employees/lima' },
       ]
     },
     { icon: FileText, label: 'Documentos', href: '#', module: 'documents' }, // Module placeholder
@@ -93,8 +94,8 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
   // Filtrado de Menú por RBAC
   const visibleMenuItems = menuItems.reduce((acc, item) => {
-    // 1. Verificar si es Admin (Bypass)
-    const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN';
+    // 1. Verificar si es Admin o tiene permisos de comodín (*)
+    const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || (user?.permissions && user?.permissions['*']);
     
     // 2. Verificar permiso de lectura en el módulo
     const hasModuleAccess = isAdmin || !item.module || (user?.permissions && user?.permissions[item.module]?.read);

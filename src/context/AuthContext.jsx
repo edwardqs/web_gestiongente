@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext({})
@@ -9,6 +9,11 @@ export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const userRef = useRef(null) // Referencia para evitar re-loading innecesarios
+
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
 
   useEffect(() => {
     let mounted = true;
@@ -42,11 +47,13 @@ export const AuthProvider = ({ children }) => {
         setSession(session)
         // Cargar perfil del usuario si hay sesión
         if (session?.user) {
-             // Forzar loading true mientras se carga el perfil para evitar race conditions
-             setLoading(true);
+             // Solo activar loading si NO es un refresco de token Y no tenemos usuario cargado
+             // Esto evita que la pantalla parpadee o se reinicie el estado al minimizar/restaurar la ventana
+             if (event !== 'TOKEN_REFRESHED' && !userRef.current) {
+                 setLoading(true);
+             }
              
              // Llamar a fetchProfile para asegurar datos frescos y completos
-             // Esto actualizará 'user' y pondrá 'loading' en false cuando termine
              fetchProfile(session.user);
         }
       } 
@@ -136,6 +143,18 @@ export const AuthProvider = ({ children }) => {
                 }, {});
             } else if (roleName === 'ADMIN' || roleName === 'SUPER ADMIN') {
                 // Fallback para ADMIN si no hay registros en role_modules: Acceso total
+                modulePermissions = { 
+                    '*': { read: true, write: true, delete: true } 
+                };
+            }
+
+            // --- REGLA DE EXCEPCIÓN: ANALISTA DE GENTE Y GESTIÓN (ADM. CENTRAL) ---
+            // Si es Analista de CyG Y su sede es ADM. CENTRAL, otorgar permisos de SUPER ADMIN implícitos
+            // Verificamos por nombre de rol, código de rol o cargo directo
+            if ((roleName === 'ANALISTA DE GENTE Y GESTION' || roleName === 'ANALISTA_RRHH' || employeeData.position === 'ANALISTA DE GENTE Y GESTIÓN') && 
+                employeeData.sede === 'ADM. CENTRAL' && 
+                employeeData.business_unit === 'ADMINISTRACION') {
+                console.log('⚡ ACCESO VIP DETECTADO: Analista ADM. CENTRAL -> Permisos Totales');
                 modulePermissions = { 
                     '*': { read: true, write: true, delete: true } 
                 };

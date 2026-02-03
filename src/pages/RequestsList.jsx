@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getRequests } from '../services/requests'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
+import Modal from '../components/ui/Modal'
 import * as html2pdfPkg from 'html2pdf.js'
 import { supabase } from '../lib/supabase'
 
@@ -34,11 +36,13 @@ const formatLongDate = (date) => {
 export default function RequestsList() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState('ALL')
   const [processingId, setProcessingId] = useState(null)
+  const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null })
 
   useEffect(() => {
     fetchRequests()
@@ -300,9 +304,19 @@ export default function RequestsList() {
     `;
   }
 
-  const handleStatusChange = async (id, newStatus) => {
-    if (!confirm(`¿Estás seguro de cambiar el estado a ${newStatus}?`)) return
+  const openStatusModal = (id, newStatus) => {
+    setModalConfig({
+      isOpen: true,
+      title: newStatus === 'APROBADO' ? 'Aprobar Solicitud' : 'Rechazar Solicitud',
+      message: `¿Estás seguro de cambiar el estado a ${newStatus}?`,
+      type: newStatus === 'APROBADO' ? 'info' : 'warning',
+      confirmText: newStatus === 'APROBADO' ? 'Aprobar' : 'Rechazar',
+      onConfirm: () => handleStatusChange(id, newStatus)
+    })
+  }
 
+  const handleStatusChange = async (id, newStatus) => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }))
     setProcessingId(id)
     try {
       let pdfUrl = null;
@@ -315,7 +329,7 @@ export default function RequestsList() {
             pdfUrl = await generateAndUploadPDF(request)
           } catch (err) {
             console.error('Error generando PDF:', err)
-            alert('Error generando el PDF, pero se intentará aprobar. ' + err.message)
+            showToast('Error generando el PDF, pero se intentará aprobar. ' + err.message, 'warning')
           }
         }
       }
@@ -337,10 +351,12 @@ export default function RequestsList() {
       setRequests(prev => prev.map(req =>
         req.id === id ? { ...req, status: newStatus, pdf_url: pdfUrl } : req
       ))
+      
+      showToast(`Solicitud ${newStatus.toLowerCase()} correctamente`, 'success')
 
     } catch (error) {
       console.error(error)
-      alert('Error al actualizar el estado: ' + error.message)
+      showToast('Error al actualizar el estado: ' + error.message, 'error')
     } finally {
       setProcessingId(null)
     }
@@ -482,7 +498,7 @@ export default function RequestsList() {
                         {req.status === 'PENDIENTE' && (
                           <>
                             <button
-                              onClick={() => handleStatusChange(req.id, 'APROBADO')}
+                              onClick={() => openStatusModal(req.id, 'APROBADO')}
                               disabled={processingId === req.id}
                               className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors"
                               title="Aprobar"
@@ -490,7 +506,7 @@ export default function RequestsList() {
                               <ThumbsUp size={16} />
                             </button>
                             <button
-                              onClick={() => handleStatusChange(req.id, 'RECHAZADO')}
+                              onClick={() => openStatusModal(req.id, 'RECHAZADO')}
                               disabled={processingId === req.id}
                               className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
                               title="Rechazar"
@@ -517,6 +533,17 @@ export default function RequestsList() {
           </table>
         </div>
       </div>
+
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+        confirmText={modalConfig.confirmText}
+        onConfirm={modalConfig.onConfirm}
+        showCancel
+      />
     </div>
   )
 }

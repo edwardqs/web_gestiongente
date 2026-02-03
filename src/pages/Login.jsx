@@ -173,7 +173,7 @@ export default function Login() {
           </form>
 
           <p className="mt-8 text-center text-sm text-gray-400">
-            © 2024 Pauser Distribuciones. Todos los derechos reservados.
+            © 2026 Pauser Distribuciones. Todos los derechos reservados.
           </p>
         </div>
       </div>

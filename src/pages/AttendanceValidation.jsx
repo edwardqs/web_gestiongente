@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { getPendingValidations, validateAttendance } from '../services/attendance'
 import { CheckCircle, XCircle, Clock, MapPin, FileText, AlertCircle } from 'lucide-react'
+import Modal from '../components/ui/Modal'
 
 export default function AttendanceValidation() {
     const { user } = useAuth()
+    const { showToast } = useToast()
     const [attendances, setAttendances] = useState([])
     const [loading, setLoading] = useState(true)
     const [filter, setFilter] = useState('pending')
     const [validating, setValidating] = useState(null)
-    const navigate = useNavigate() // Necesitamos navigate
+    const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null, showInput: false })
+    const [modalInput, setModalInput] = useState('')
+    const navigate = useNavigate()
 
     useEffect(() => {
         // Verificar permisos al montar
@@ -23,7 +28,7 @@ export default function AttendanceValidation() {
             const isHR = userPosition.includes('ANALISTA DE GENTE') || userPosition.includes('JEFE DE ÁREA')
 
             if (!allowedRoles.includes(userRole) && !isHR) {
-                alert('No tiene permisos para acceder a esta página')
+                showToast('No tiene permisos para acceder a esta página', 'error')
                 navigate('/')
                 return
             }
@@ -39,21 +44,31 @@ export default function AttendanceValidation() {
             setAttendances(data)
         } catch (error) {
             console.error('Error cargando asistencias:', error)
-            alert('Error cargando asistencias: ' + error.message)
+            showToast('Error cargando asistencias: ' + error.message, 'error')
         } finally {
             setLoading(false)
         }
     }
 
+    const openValidationModal = (attendanceId, approved) => {
+        setModalInput('')
+        setModalConfig({
+            isOpen: true,
+            title: approved ? 'Aprobar Asistencia' : 'Rechazar Asistencia',
+            message: approved ? '¿Desea agregar alguna nota opcional?' : 'Indique la razón del rechazo:',
+            type: approved ? 'info' : 'warning',
+            showInput: true,
+            inputPlaceholder: approved ? 'Nota opcional...' : 'Razón del rechazo...',
+            confirmText: approved ? 'Aprobar' : 'Rechazar',
+            onConfirm: () => handleValidate(attendanceId, approved)
+        })
+    }
+
     async function handleValidate(attendanceId, approved) {
-        const notes = prompt(
-            approved
-                ? '¿Desea agregar alguna nota? (opcional)'
-                : 'Indique la razón del rechazo:'
-        )
+        const notes = modalInput
 
         if (!approved && !notes) {
-            alert('Debe indicar la razón del rechazo')
+            showToast('Debe indicar la razón del rechazo', 'warning')
             return
         }
 
@@ -66,11 +81,12 @@ export default function AttendanceValidation() {
                 notes
             })
 
-            alert(approved ? 'Asistencia validada correctamente' : 'Asistencia rechazada')
+            showToast(approved ? 'Asistencia validada correctamente' : 'Asistencia rechazada', 'success')
+            setModalConfig(prev => ({ ...prev, isOpen: false }))
             loadAttendances()
         } catch (error) {
             console.error('Error validando:', error)
-            alert('Error: ' + error.message)
+            showToast('Error: ' + error.message, 'error')
         } finally {
             setValidating(null)
         }
@@ -225,7 +241,7 @@ export default function AttendanceValidation() {
                                 {/* Botones de acción */}
                                 <div className="flex flex-col gap-2 ml-4">
                                     <button
-                                        onClick={() => handleValidate(attendance.attendance_id, true)}
+                                        onClick={() => openValidationModal(attendance.attendance_id, true)}
                                         disabled={validating === attendance.attendance_id}
                                         className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
@@ -233,7 +249,7 @@ export default function AttendanceValidation() {
                                         Aprobar
                                     </button>
                                     <button
-                                        onClick={() => handleValidate(attendance.attendance_id, false)}
+                                        onClick={() => openValidationModal(attendance.attendance_id, false)}
                                         disabled={validating === attendance.attendance_id}
                                         className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
@@ -246,6 +262,30 @@ export default function AttendanceValidation() {
                     ))}
                 </div>
             )}
+
+            <Modal
+                isOpen={modalConfig.isOpen}
+                onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+                title={modalConfig.title}
+                message={modalConfig.message}
+                type={modalConfig.type}
+                confirmText={modalConfig.confirmText}
+                onConfirm={modalConfig.onConfirm}
+                showCancel
+            >
+                {modalConfig.showInput && (
+                    <div className="mt-4">
+                        <textarea
+                            value={modalInput}
+                            onChange={(e) => setModalInput(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder={modalConfig.inputPlaceholder}
+                            rows={3}
+                            autoFocus
+                        />
+                    </div>
+                )}
+            </Modal>
         </div>
     )
 }
