@@ -68,7 +68,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
           label: 'Huaraz',
           icon: MapPin,
           submenu: [
-            { label: 'Bebida', icon: Store, href: '/employees/huaraz?business=bebida' },
+            { label: 'Bebidas', icon: Store, href: '/employees/huaraz?business=bebidas' },
             { label: 'Purina', icon: Store, href: '/employees/huaraz?business=purina' }
           ]
         },
