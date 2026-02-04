@@ -148,7 +148,7 @@ export default function RolesManagement() {
       <div className="w-full md:w-1/3 flex flex-col gap-4">
         <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                <Shield className="text-blue-600" /> Roles
+                <Shield className="text-blue-600" /> Permisos
             </h2>
             <button 
                 onClick={() => setShowCreateModal(true)}

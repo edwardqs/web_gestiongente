@@ -11,6 +11,8 @@ import RequestsList from './pages/RequestsList'
 import CalendarRequests from './pages/CalendarRequests'
 import RolesManagement from './pages/RolesManagement'
 import PositionsManagement from './pages/PositionsManagement'
+import VacationDashboard from './pages/VacationDashboard'
+import VacationExcelUpload from './pages/VacationExcelUpload'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
 
@@ -126,6 +128,23 @@ function App() {
               <PrivateRoute>
                 <ProtectedRoute module="requests">
                   <PapeletaVacaciones />
+                </ProtectedRoute>
+              </PrivateRoute>
+            } />
+
+            {/* Rutas de Gestión de Vacaciones */}
+            <Route path="/vacaciones" element={
+              <PrivateRoute>
+                <ProtectedRoute module="vacations">
+                  <VacationDashboard />
+                </ProtectedRoute>
+              </PrivateRoute>
+            } />
+            
+            <Route path="/vacaciones/carga-masiva" element={
+              <PrivateRoute>
+                <ProtectedRoute module="vacations" requiredAction="write">
+                  <VacationExcelUpload />
                 </ProtectedRoute>
               </PrivateRoute>
             } />

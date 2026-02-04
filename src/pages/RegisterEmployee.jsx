@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
@@ -35,6 +35,7 @@ export default function RegisterEmployee() {
     business_unit: initialBusiness,
     location_id: null,
     department_id: null,
+    document_type: 'DNI',
     dni: '',
     full_name: '',
     entry_date: '',
@@ -56,9 +57,13 @@ export default function RegisterEmployee() {
     if (!formData.business_unit) newErrors.business_unit = 'La unidad de negocio es obligatoria'
     
     if (!formData.dni) {
-      newErrors.dni = 'El DNI es obligatorio'
-    } else if (!/^\d{8}$/.test(formData.dni)) {
-      newErrors.dni = 'El DNI debe tener 8 dígitos numéricos'
+      newErrors.dni = `El ${formData.document_type} es obligatorio`
+    } else {
+        if (formData.document_type === 'DNI' && !/^\d{8}$/.test(formData.dni)) {
+            newErrors.dni = 'El DNI debe tener 8 dígitos numéricos'
+        } else if (formData.document_type === 'CE' && !/^\d{9,12}$/.test(formData.dni)) {
+             newErrors.dni = 'El CE debe tener entre 9 y 12 dígitos numéricos'
+        }
     }
 
     if (!formData.full_name) {
@@ -187,6 +192,7 @@ export default function RegisterEmployee() {
           location_id: data.location_id || null, // Si existe en DB
           department_id: data.department_id || null, // Si existe en DB
           employee_type: data.employee_type || '',
+          document_type: data.document_type || 'DNI',
           dni: data.dni || '',
           full_name: data.full_name || '',
           entry_date: data.entry_date || '',
@@ -270,6 +276,8 @@ export default function RegisterEmployee() {
     try {
       const dataToSave = {
         ...formData,
+        full_name: formData.full_name?.toUpperCase(),
+        address: formData.address?.toUpperCase(),
         role_id: null // Forzamos null en role_id para evitar conflictos de Foreign Key con la tabla 'roles'
       }
       
@@ -371,23 +379,61 @@ export default function RegisterEmployee() {
             </div>
 
 
-            {/* DNI */}
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                <FileText size={16} className="text-blue-500" /> DNI
-              </label>
-              <input
-                type="text"
-                name="dni"
-                value={formData.dni}
-                onChange={handleChange}
-                maxLength={8}
-                pattern="\d{8}"
-                placeholder="12345678"
-                required
-                className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.dni ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
-              />
-              {errors.dni && <p className="text-red-500 text-xs mt-1">{errors.dni}</p>}
+            {/* Tipo de Documento y Número */}
+            <div className="space-y-4">
+              <div className="flex gap-6 items-center p-1">
+                 <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${formData.document_type === 'DNI' ? 'border-blue-600' : 'border-gray-300 group-hover:border-blue-400'}`}>
+                        {formData.document_type === 'DNI' && <div className="w-3 h-3 rounded-full bg-blue-600"></div>}
+                    </div>
+                    <input 
+                        type="radio" 
+                        name="document_type" 
+                        value="DNI" 
+                        checked={formData.document_type === 'DNI'} 
+                        onChange={handleChange}
+                        className="hidden"
+                    />
+                    <span className={`text-sm font-medium ${formData.document_type === 'DNI' ? 'text-blue-700' : 'text-gray-600'}`}>DNI</span>
+                 </label>
+
+                 <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${formData.document_type === 'CE' ? 'border-blue-600' : 'border-gray-300 group-hover:border-blue-400'}`}>
+                        {formData.document_type === 'CE' && <div className="w-3 h-3 rounded-full bg-blue-600"></div>}
+                    </div>
+                    <input 
+                        type="radio" 
+                        name="document_type" 
+                        value="CE" 
+                        checked={formData.document_type === 'CE'} 
+                        onChange={handleChange}
+                        className="hidden"
+                    />
+                    <span className={`text-sm font-medium ${formData.document_type === 'CE' ? 'text-blue-700' : 'text-gray-600'}`}>Carnét de Extranjería</span>
+                 </label>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <FileText size={16} className="text-blue-500" /> 
+                    {formData.document_type === 'DNI' ? 'Número de DNI' : 'Número de CE'}
+                </label>
+                <input
+                    type="text"
+                    name="dni"
+                    value={formData.dni}
+                    onChange={(e) => {
+                        // Permitir solo números
+                        const val = e.target.value.replace(/\D/g, '')
+                        handleChange({ target: { name: 'dni', value: val } })
+                    }}
+                    maxLength={formData.document_type === 'DNI' ? 8 : 12}
+                    placeholder={formData.document_type === 'DNI' ? "12345678" : "000000000"}
+                    required
+                    className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 transition-all ${errors.dni ? 'border-red-300 focus:ring-red-200' : 'border-gray-200 focus:ring-blue-500/20 focus:border-blue-500'}`}
+                />
+                {errors.dni && <p className="text-red-500 text-xs mt-1">{errors.dni}</p>}
+              </div>
             </div>
 
             {/* Apellidos y Nombres */}

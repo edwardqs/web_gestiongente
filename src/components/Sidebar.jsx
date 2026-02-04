@@ -18,7 +18,8 @@ import {
   Store,
   Building2, // Icono para Adm. Central
   Calendar, // Icono para Calendario
-  Shield // Icono para Roles
+  Shield, // Icono para Roles
+  Plane // Icono para Vacaciones
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
@@ -40,6 +41,16 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     { icon: Users, label: 'Empleados', href: '#', module: 'employees' }, // Podría llevar a /employees/all en el futuro
     { icon: Clock, label: 'Asistencias', href: '/attendance-list', module: 'attendance' },
     { icon: FileText, label: 'Solicitudes', href: '/requests', module: 'requests' },
+    { 
+      icon: Plane, 
+      label: 'Vacaciones', 
+      href: '#',
+      module: 'vacations',
+      submenu: [
+        { label: 'Monitor / Kardex', href: '/vacaciones', icon: Plane },
+        { label: 'Carga Masiva', href: '/vacaciones/carga-masiva', icon: FileText }
+      ]
+    },
     { icon: Calendar, label: 'Calendario', href: '/calendar', module: 'calendar' },
     {
       icon: Briefcase,
@@ -86,7 +97,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: '#',
       module: 'settings',
       submenu: [
-        { label: 'Roles y Permisos', icon: Shield, href: '/roles' },
+        { label: 'Usuarios y Permisos', icon: Shield, href: '/roles' },
         { label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' }
       ]
     },

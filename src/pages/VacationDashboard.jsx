@@ -1,0 +1,323 @@
+import { useState, useEffect } from 'react'
+import { getVacationOverview } from '../services/vacations'
+import { getLocations } from '../services/structure'
+import Modal from '../components/ui/Modal'
+import { 
+    Search, Filter, AlertTriangle, CheckCircle, 
+    Calendar, Calculator, Clock, Briefcase, MapPin 
+} from 'lucide-react'
+
+export default function VacationDashboard() {
+    const [employees, setEmployees] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [sedes, setSedes] = useState([])
+    
+    // Filtros
+    const [selectedSede, setSelectedSede] = useState('')
+    const [searchTerm, setSearchTerm] = useState('')
+    const [statusFilter, setStatusFilter] = useState('all')
+
+    // Modal
+    const [selectedEmployee, setSelectedEmployee] = useState(null)
+    const [isModalOpen, setIsModalOpen] = useState(false)
+
+    // Cargar datos iniciales
+    useEffect(() => {
+        const fetchInitial = async () => {
+            const { data: locs } = await getLocations()
+            if (locs) setSedes(locs)
+            loadData()
+        }
+        fetchInitial()
+    }, [])
+
+    // Cargar empleados cuando cambian filtros de API (Sede/Search)
+    // Nota: El filtro de estado lo haremos en cliente para evitar llamadas excesivas,
+    // pero Sede y Search sí van al RPC para optimizar.
+    useEffect(() => {
+        loadData()
+    }, [selectedSede, searchTerm]) // Debounce idealmente para search
+
+    const loadData = async () => {
+        setLoading(true)
+        try {
+            // Pasamos searchTerm solo si tiene longitud razonable para no saturar
+            const searchParam = searchTerm.length > 2 ? searchTerm : null
+            const { data, error } = await getVacationOverview(selectedSede, searchParam)
+            
+            if (error) throw error
+            setEmployees(data || [])
+        } catch (err) {
+            console.error("Error cargando vacaciones:", err)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    // Filtrado local por Estado (Semáforo)
+    const filteredData = employees.filter(emp => {
+        if (statusFilter === 'all') return true
+        return emp.status === statusFilter
+    })
+
+    // KPIs
+    const totalEmployees = employees.length
+    const dangerCount = employees.filter(e => e.status === 'danger').length
+    const warningCount = employees.filter(e => e.status === 'warning').length
+    const safeCount = employees.filter(e => e.status === 'safe').length
+
+    const handleOpenKardex = (emp) => {
+        setSelectedEmployee(emp)
+        setIsModalOpen(true)
+    }
+
+    const getStatusBadge = (status) => {
+        switch(status) {
+            case 'danger': 
+                return <span className="px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold flex items-center gap-1"><AlertTriangle size={12} /> CRÍTICO (+30d)</span>
+            case 'warning': 
+                return <span className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 text-xs font-bold flex items-center gap-1"><Clock size={12} /> POR VENCER (15-30d)</span>
+            default: 
+                return <span className="px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center gap-1"><CheckCircle size={12} /> AL DÍA</span>
+        }
+    }
+
+    return (
+        <div className="space-y-6 p-6 bg-slate-50 min-h-screen">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800">Monitor de Vacaciones</h1>
+                    <p className="text-slate-500 text-sm">Gestión y control de saldos vacacionales</p>
+                </div>
+                
+                {/* KPIs Rápidos */}
+                <div className="flex gap-4">
+                    <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-col items-center min-w-[100px]">
+                        <span className="text-xs text-slate-400 uppercase font-bold">Total</span>
+                        <span className="text-xl font-bold text-slate-700">{totalEmployees}</span>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded-lg shadow-sm border border-red-100 flex flex-col items-center min-w-[100px]">
+                        <span className="text-xs text-red-600 uppercase font-bold">Críticos</span>
+                        <span className="text-xl font-bold text-red-700">{dangerCount}</span>
+                    </div>
+                    <div className="bg-yellow-50 p-3 rounded-lg shadow-sm border border-yellow-100 flex flex-col items-center min-w-[100px]">
+                        <span className="text-xs text-yellow-600 uppercase font-bold">Por Vencer</span>
+                        <span className="text-xl font-bold text-yellow-700">{warningCount}</span>
+                    </div>
+                    <div className="bg-green-50 p-3 rounded-lg shadow-sm border border-green-100 flex flex-col items-center min-w-[100px]">
+                        <span className="text-xs text-green-600 uppercase font-bold">Al Día</span>
+                        <span className="text-xl font-bold text-green-700">{safeCount}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Filtros */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end md:items-center">
+                <div className="w-full md:w-64">
+                    <label className="text-xs font-semibold text-slate-500 mb-1 block">Buscar</label>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input 
+                            type="text" 
+                            placeholder="Nombre o DNI..." 
+                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                <div className="w-full md:w-48">
+                    <label className="text-xs font-semibold text-slate-500 mb-1 block">Sede</label>
+                    <div className="relative">
+                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <select 
+                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none"
+                            value={selectedSede}
+                            onChange={(e) => setSelectedSede(e.target.value)}
+                        >
+                            <option value="">Todas las Sedes</option>
+                            {sedes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="w-full md:w-48">
+                    <label className="text-xs font-semibold text-slate-500 mb-1 block">Estado</label>
+                    <div className="relative">
+                        <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <select 
+                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none"
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                        >
+                            <option value="all">Todos</option>
+                            <option value="safe">Al Día</option>
+                            <option value="warning">Alerta (+15 días)</option>
+                            <option value="danger">Crítico (+30 días)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {/* Tabla */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left text-slate-600">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th className="px-6 py-4 font-bold">Empleado</th>
+                                <th className="px-6 py-4 font-bold">Sede / Cargo</th>
+                                <th className="px-6 py-4 font-bold text-center">Ingreso</th>
+                                <th className="px-6 py-4 font-bold text-center">Ganados</th>
+                                <th className="px-6 py-4 font-bold text-center">Consumidos</th>
+                                <th className="px-6 py-4 font-bold text-center">Saldo</th>
+                                <th className="px-6 py-4 font-bold text-center">Estado</th>
+                                <th className="px-6 py-4 text-right">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {loading ? (
+                                <tr>
+                                    <td colSpan="8" className="px-6 py-8 text-center text-slate-400">
+                                        <div className="flex justify-center items-center gap-2">
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                            Cargando datos...
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : filteredData.length === 0 ? (
+                                <tr>
+                                    <td colSpan="8" className="px-6 py-8 text-center text-slate-400">
+                                        No se encontraron registros.
+                                    </td>
+                                </tr>
+                            ) : (
+                                filteredData.map((emp) => (
+                                    <tr key={emp.employee_id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-4 font-medium text-slate-900">
+                                            {emp.full_name}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex flex-col">
+                                                <span className="font-medium text-slate-700">{emp.sede}</span>
+                                                <span className="text-xs text-slate-400">{emp.position}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center text-slate-500">
+                                            {emp.entry_date}
+                                            <div className="text-xs text-slate-400">({emp.years_service} años)</div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center font-bold text-blue-600 bg-blue-50/50 rounded-lg">
+                                            {emp.earned_days}
+                                        </td>
+                                        <td className="px-6 py-4 text-center text-slate-600">
+                                            {parseFloat(emp.legacy_taken) + parseFloat(emp.app_taken)}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`px-3 py-1 rounded-lg font-bold ${
+                                                emp.balance >= 0 ? 'bg-slate-100 text-slate-800' : 'bg-red-100 text-red-700'
+                                            }`}>
+                                                {emp.balance.toFixed(2)}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <div className="flex justify-center">
+                                                {getStatusBadge(emp.status)}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <button 
+                                                onClick={() => handleOpenKardex(emp)}
+                                                className="text-blue-600 hover:text-blue-800 font-medium text-xs border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
+                                            >
+                                                Ver Detalle
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Modal Kardex */}
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title="Kardex de Vacaciones"
+                cancelText="Cerrar"
+                showCancel={true}
+            >
+                {selectedEmployee && (
+                    <div className="space-y-6">
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex justify-between items-center">
+                            <div>
+                                <h3 className="font-bold text-lg text-slate-800">{selectedEmployee.full_name}</h3>
+                                <p className="text-sm text-slate-500 flex items-center gap-2">
+                                    <Briefcase size={14} /> {selectedEmployee.position}
+                                    <span className="text-slate-300">|</span>
+                                    <Calendar size={14} /> Ingreso: {selectedEmployee.entry_date}
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <span className="block text-xs text-slate-400 uppercase font-bold">Saldo Actual</span>
+                                <span className={`text-2xl font-bold ${
+                                    selectedEmployee.balance >= 0 ? 'text-blue-600' : 'text-red-600'
+                                }`}>
+                                    {selectedEmployee.balance.toFixed(2)}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="p-4 rounded-lg border border-blue-100 bg-blue-50">
+                                <div className="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm">
+                                    <Calculator size={16} /> Días Ganados
+                                </div>
+                                <div className="text-2xl font-bold text-blue-800">{selectedEmployee.earned_days}</div>
+                                <p className="text-xs text-blue-600 mt-1">
+                                    (Antigüedad / 360) * 30
+                                </p>
+                            </div>
+                            
+                            <div className="p-4 rounded-lg border border-slate-200 bg-white">
+                                <div className="flex items-center gap-2 mb-2 text-slate-600 font-bold text-sm">
+                                    <Clock size={16} /> Consumo Histórico
+                                </div>
+                                <div className="text-2xl font-bold text-slate-700">{selectedEmployee.legacy_taken}</div>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    Migración Excel
+                                </p>
+                            </div>
+
+                            <div className="p-4 rounded-lg border border-purple-100 bg-purple-50">
+                                <div className="flex items-center gap-2 mb-2 text-purple-700 font-bold text-sm">
+                                    <Calendar size={16} /> Consumo App
+                                </div>
+                                <div className="text-2xl font-bold text-purple-800">{selectedEmployee.app_taken}</div>
+                                <p className="text-xs text-purple-600 mt-1">
+                                    Solicitudes Aprobadas
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm text-slate-600">
+                            <h4 className="font-bold mb-2 flex items-center gap-2">
+                                <Calculator size={14} /> Fórmula de Cálculo
+                            </h4>
+                            <p className="font-mono bg-white p-2 rounded border border-slate-200 text-xs">
+                                SALDO = (GANADOS) - (HISTÓRICO + APP)
+                            </p>
+                            <p className="font-mono bg-white p-2 rounded border border-slate-200 text-xs mt-2">
+                                {selectedEmployee.balance.toFixed(2)} = ({selectedEmployee.earned_days}) - ({selectedEmployee.legacy_taken} + {selectedEmployee.app_taken})
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+        </div>
+    )
+}
