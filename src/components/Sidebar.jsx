@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link } from 'react-router-dom' // Importar Link
 import { useAuth } from '../context/AuthContext'
+import { uploadProfilePicture, updateUserProfilePicture } from '../services/profile'
 import {
   Users,
   Home,
@@ -19,14 +20,50 @@ import {
   Building2, // Icono para Adm. Central
   Calendar, // Icono para Calendario
   Shield, // Icono para Roles
-  Plane // Icono para Vacaciones
+  Plane, // Icono para Vacaciones
+  Camera, // Nuevo icono
+  User // Nuevo icono
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
-  const { signOut, user } = useAuth()
+  const { signOut, user, refreshProfile } = useAuth()
+  const fileInputRef = useRef(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   // Estado para manejar qué menús están expandidos por su etiqueta (label)
   const [expandedMenus, setExpandedMenus] = useState({})
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (!user?.employee_id) {
+        alert('Error: No se encontró ID de empleado para asociar la imagen.')
+        return
+    }
+
+    try {
+        setIsUploading(true)
+        // 1. Subir imagen
+        const { publicUrl, error: uploadError } = await uploadProfilePicture(user.employee_id, file)
+        if (uploadError) throw uploadError
+
+        // 2. Actualizar perfil en DB
+        const { error: dbError } = await updateUserProfilePicture(user.employee_id, publicUrl)
+        if (dbError) throw dbError
+
+        // 3. Refrescar contexto
+        if (refreshProfile) refreshProfile()
+        
+    } catch (error) {
+        console.error('Error uploading profile picture:', error)
+        alert('Error al subir la foto de perfil')
+    } finally {
+        setIsUploading(false)
+        // Limpiar input
+        if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const toggleMenu = (label) => {
     if (isCollapsed) setIsCollapsed(false)
@@ -105,8 +142,8 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
   // Filtrado de Menú por RBAC
   const visibleMenuItems = menuItems.reduce((acc, item) => {
-    // 1. Verificar si es Admin o tiene permisos de comodín (*)
-    const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || (user?.permissions && user?.permissions['*']);
+    // 1. Verificar si es Admin, Super Admin, Jefe RRHH o tiene permisos de comodín (*)
+    const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*']);
     
     // 2. Verificar permiso de lectura en el módulo
     const hasModuleAccess = isAdmin || !item.module || (user?.permissions && user?.permissions[item.module]?.read);
@@ -250,17 +287,61 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
           {/* Footer del Sidebar (Usuario y Logout) */}
           <div className="p-3 border-t border-gray-100 mt-auto sticky bottom-0 bg-white">
-            <div className={`flex items-center gap-3 px-2 py-2 mb-2 rounded-lg bg-gray-50 ${isCollapsed ? 'justify-center' : ''}`}>
-              <div className="w-8 h-8 min-w-[32px] rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                {user?.email?.charAt(0).toUpperCase()}
-              </div>
-              {!isCollapsed && (
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">
-                    {user?.email}
-                  </p>
+            <div className={`flex flex-col items-center gap-2 mb-3 ${isCollapsed ? '' : 'px-2'}`}>
+                {/* Avatar con botón de subida */}
+                <div className="relative group">
+                    <div className={`
+                        relative overflow-hidden rounded-full border-2 border-gray-100 shadow-sm
+                        ${isCollapsed ? 'w-10 h-10' : 'w-16 h-16'}
+                    `}>
+                        {user?.profile?.profile_picture_url ? (
+                            <img 
+                                src={user.profile.profile_picture_url} 
+                                alt="Perfil" 
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
+                                {user?.full_name ? user.full_name.charAt(0).toUpperCase() : <User size={isCollapsed ? 20 : 32} />}
+                            </div>
+                        )}
+                        
+                        {/* Overlay de carga */}
+                        {isUploading && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Botón de cámara (Solo visible en hover y si no está colapsado o si se decide permitir en colapsado) */}
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`
+                            absolute bottom-0 right-0 bg-white text-gray-600 p-1.5 rounded-full shadow-md border border-gray-200 hover:text-blue-600 hover:border-blue-300 transition-all
+                            ${isUploading ? 'hidden' : 'opacity-0 group-hover:opacity-100'}
+                            ${isCollapsed ? 'scale-75 -bottom-1 -right-1' : ''}
+                        `}
+                        title="Cambiar foto"
+                    >
+                        <Camera size={14} />
+                    </button>
                 </div>
-              )}
+
+                {/* Info de Usuario */}
+                {!isCollapsed && (
+                    <div className="text-center w-full">
+                        <p className="text-sm font-bold text-gray-900 truncate px-1">
+                            {user?.full_name || 'Usuario'}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate px-1" title={user?.email}>
+                            {user?.email}
+                        </p>
+                        <p className="text-[10px] text-blue-600 font-medium mt-0.5 bg-blue-50 inline-block px-2 py-0.5 rounded-full">
+                            {user?.position || user?.role || 'Personal'}
+                        </p>
+                    </div>
+                )}
             </div>
 
             <button
@@ -272,8 +353,17 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
               title={isCollapsed ? 'Cerrar Sesión' : ''}
             >
               <LogOut size={20} className="min-w-[20px]" />
-              {!isCollapsed && <span className="font-medium whitespace-nowrap">Salir</span>}
+              {!isCollapsed && <span className="font-medium whitespace-nowrap">Cerrar Sesión</span>}
             </button>
+
+            {/* Input oculto para subir archivo */}
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                accept="image/png, image/jpeg, image/jpg, image/webp"
+                onChange={handleFileChange}
+            />
           </div>
         </div>
       </aside>

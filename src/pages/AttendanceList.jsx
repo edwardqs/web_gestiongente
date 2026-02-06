@@ -30,20 +30,30 @@ export default function AttendanceList() {
 
     // Verificar permisos de validación (Solo RRHH)
     const canValidate = () => {
-        if (!user?.position) return false
+        if (!user) return false
+        
+        // Permisos por Rol (Admin, Jefe RRHH, Super Admin)
+        if (user.role === 'ADMIN' || user.role === 'SUPER ADMIN' || user.role === 'JEFE_RRHH') return true
+        
+        // Permisos por Cargo (Legacy/Fallback)
+        if (!user.position) return false
         
         // Normalizamos quitando tildes para evitar problemas de compatibilidad
         const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
         
         const userPosition = normalize(user.position);
         
+        // Lista extendida de cargos permitidos
         const allowedPositions = [
             'ANALISTA DE GENTE Y GESTION',
             'JEFE DE AREA DE GENTE Y GESTION',
+            'JEFE DE GENTE Y GESTION', // Nueva variante
+            'JEFE DE GENTE Y GESTIÓN', // Con tilde explícita
             'ADMIN'
         ]
         
-        return allowedPositions.includes(userPosition)
+        // Verificar coincidencia exacta o parcial (includes) para mayor flexibilidad
+        return allowedPositions.some(pos => userPosition.includes(normalize(pos)))
     }
 
     const hasValidationPermission = canValidate()

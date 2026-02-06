@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { getRecentActivity, subscribeToActivity } from '../services/activity'
+import { getDashboardStats } from '../services/dashboard'
 import { 
   Users, 
   Clock, 
@@ -21,6 +22,8 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [activities, setActivities] = useState([])
   const [loadingActivities, setLoadingActivities] = useState(true)
+  const [statsData, setStatsData] = useState(null)
+  const [loadingStats, setLoadingStats] = useState(true)
 
   // Cargar actividades iniciales y suscribirse a cambios
   useEffect(() => {
@@ -34,7 +37,15 @@ export default function Dashboard() {
     }
     loadActivities()
 
-    // 2. Suscribirse a tiempo real
+    // 2. Cargar Estadísticas
+    const loadStats = async () => {
+      const { data } = await getDashboardStats()
+      if (data) setStatsData(data)
+      setLoadingStats(false)
+    }
+    loadStats()
+
+    // 3. Suscribirse a tiempo real
     const subscription = subscribeToActivity((payload) => {
       setActivities(prev => {
         // Manejar borrado
@@ -139,12 +150,12 @@ export default function Dashboard() {
     }
   }
 
-  // Datos simulados de stats (por ahora estáticos)
+  // Datos reales de stats
   const stats = [
     { 
       label: 'Total Empleados', 
-      value: '124', 
-      change: '+4 este mes', 
+      value: loadingStats ? '...' : (statsData?.total_employees || 0), 
+      change: 'Activos', 
       icon: Users, 
       color: 'blue',
       bg: 'bg-blue-50',
@@ -152,8 +163,8 @@ export default function Dashboard() {
     },
     { 
       label: 'Asistencias Hoy', 
-      value: '112', 
-      change: '90% del personal', 
+      value: loadingStats ? '...' : (statsData?.attendance_today || 0), 
+      change: 'Registradas hoy', 
       icon: Clock, 
       color: 'green',
       bg: 'bg-green-50',
@@ -161,8 +172,8 @@ export default function Dashboard() {
     },
     { 
       label: 'Solicitudes Pendientes', 
-      value: '5', 
-      change: 'Vacaciones / Permisos', 
+      value: loadingStats ? '...' : (statsData?.pending_requests || 0), 
+      change: 'Por aprobar', 
       icon: FileText, 
       color: 'orange',
       bg: 'bg-orange-50',
@@ -170,8 +181,8 @@ export default function Dashboard() {
     },
     { 
       label: 'Tardanzas (Mes)', 
-      value: '12', 
-      change: '-2 vs mes anterior', 
+      value: loadingStats ? '...' : (statsData?.lateness_month || 0), 
+      change: 'Mes actual', 
       icon: AlertCircle, 
       color: 'red',
       bg: 'bg-red-50',

@@ -148,14 +148,22 @@ export const AuthProvider = ({ children }) => {
                 };
             }
 
-            // --- REGLA DE EXCEPCIÓN: ANALISTA DE GENTE Y GESTIÓN (ADM. CENTRAL) ---
-            // Si es Analista de CyG Y su sede es ADM. CENTRAL, otorgar permisos de SUPER ADMIN implícitos
+            // --- REGLA DE EXCEPCIÓN: ANALISTA DE GENTE Y GESTIÓN (ADM. CENTRAL) Y JEFE DE RRHH ---
+            // Si es Analista de CyG Y su sede es ADM. CENTRAL, O si es JEFE DE GENTE/RRHH, otorgar permisos de SUPER ADMIN implícitos
             // Verificamos por nombre de rol, código de rol o cargo directo
             if ((roleName === 'ANALISTA DE GENTE Y GESTION' || roleName === 'ANALISTA_RRHH' || employeeData.position === 'ANALISTA DE GENTE Y GESTIÓN') && 
                 employeeData.sede === 'ADM. CENTRAL' && 
                 employeeData.business_unit === 'ADMINISTRACION') {
                 console.log('⚡ ACCESO VIP DETECTADO: Analista ADM. CENTRAL -> Permisos Totales');
                 modulePermissions = { 
+                    '*': { read: true, write: true, delete: true } 
+                };
+            }
+            
+            // Regla para JEFE DE RRHH / JEFE DE GENTE Y GESTIÓN
+            if (roleName === 'JEFE_RRHH' || employeeData.position?.includes('JEFE DE GENTE')) {
+                 console.log('⚡ ACCESO VIP DETECTADO: JEFE RRHH -> Permisos Totales');
+                 modulePermissions = { 
                     '*': { read: true, write: true, delete: true } 
                 };
             }

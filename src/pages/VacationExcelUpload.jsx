@@ -18,184 +18,139 @@ export default function VacationExcelUpload() {
         }
     }
 
-    const readExcel = (file) => {
+const readExcel = (file) => {
         const reader = new FileReader()
         reader.onload = (e) => {
             const data = new Uint8Array(e.target.result)
             const workbook = XLSX.read(data, { type: 'array' })
-            const sheetName = workbook.SheetNames[0]
-            const sheet = workbook.Sheets[sheetName]
             
             // ====================================================================
-            // SOLUCIÓN DEFINITIVA: Leer TODAS las filas sin filtrar espacios vacíos
+            // NUEVO: Lógica de selección inteligente de hoja
+            // Buscamos cuál de todas las hojas tiene más registros válidos (DNIs)
             // ====================================================================
-            const rawData = XLSX.utils.sheet_to_json(sheet, { 
-                header: 1,
-                blankrows: true,  // Mantener filas vacías para indexación correcta
-                defval: null,     // Valores nulos para celdas vacías
-                raw: false        // Convertir todo a string primero
-            })
-            
+            let bestSheetName = workbook.SheetNames[0];
+            let maxValidRows = 0;
+            let bestRawData = [];
+
+            console.log("🔎 Analizando hojas del Excel...");
+
+            workbook.SheetNames.forEach(name => {
+                const sheet = workbook.Sheets[name];
+                
+                // Leemos una muestra rápida
+                const raw = XLSX.utils.sheet_to_json(sheet, { 
+                    header: 1, 
+                    blankrows: false,
+                    defval: '' 
+                });
+
+                // Buscamos si tiene columna DNI en las primeras 20 filas
+                let dniIdx = -1;
+                let headerRowIdx = -1;
+
+                for (let i = 0; i < Math.min(raw.length, 20); i++) {
+                    const row = raw[i];
+                    if (!Array.isArray(row)) continue;
+                    
+                    const idx = row.findIndex(cell => 
+                        cell && String(cell).toUpperCase().includes('DNI')
+                    );
+                    
+                    if (idx !== -1) {
+                        dniIdx = idx;
+                        headerRowIdx = i;
+                        break;
+                    }
+                }
+
+                if (dniIdx !== -1) {
+                    // Contamos cuántos DNIs válidos tiene esta hoja
+                    const validCount = raw.slice(headerRowIdx + 1).filter(r => {
+                        const val = r[dniIdx];
+                        return val && /^\d{8,12}$/.test(String(val).trim());
+                    }).length;
+
+                    console.log(`📄 Hoja "${name}": ${validCount} registros encontrados.`);
+
+                    // Si esta hoja tiene más datos que la anterior, ¡es la ganadora!
+                    if (validCount > maxValidRows) {
+                        maxValidRows = validCount;
+                        bestSheetName = name;
+                        bestRawData = raw; // Guardamos los datos de la ganadora
+                    }
+                }
+            });
+
+            console.log(`✅ GANADORA: Hoja "${bestSheetName}" con ${maxValidRows} registros.`);
+            alert(`Se detectó automáticamente la hoja "${bestSheetName}" con ${maxValidRows} empleados.`);
+
+            // Usamos los datos de la hoja ganadora
+            const rawData = bestRawData.length > 0 
+                ? bestRawData 
+                : XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+
             if (rawData.length === 0) {
                 alert('⚠️ El archivo está vacío o no se pudo leer.');
                 return;
             }
 
-            console.log(`📊 Filas totales leídas del Excel: ${rawData.length}`);
-
-            // ====================================================================
-            // PASO 1: Detectar fila de encabezados (Mejorado)
-            // ====================================================================
+            // --- A PARTIR DE AQUÍ TODO SIGUE IGUAL (Lógica de Mapeo) ---
+            // Solo asegurate de que las variables de abajo usen 'rawData'
+            
+            // 1. Detectar encabezados (reutilizamos lógica existente)
             let headerRowIndex = -1;
             const possibleDniHeaders = ['DNI', 'DOCUMENTO', 'CODIGO', 'ID'];
             
-            // Buscamos en las primeras 50 filas
             for (let i = 0; i < Math.min(rawData.length, 50); i++) {
                 const row = rawData[i];
                 if (!row || !Array.isArray(row)) continue;
-                
                 const hasDniHeader = row.some(cell => {
                     if (!cell) return false;
-                    const cellStr = String(cell).toUpperCase().trim();
-                    return possibleDniHeaders.some(header => cellStr.includes(header));
+                    return possibleDniHeaders.some(h => String(cell).toUpperCase().includes(h));
                 });
-                
-                if (hasDniHeader) {
-                    headerRowIndex = i;
-                    break;
-                }
+                if (hasDniHeader) { headerRowIndex = i; break; }
             }
 
             if (headerRowIndex === -1) {
-                alert('⚠️ No se encontró la fila de encabezados. Asegúrate de que el Excel tenga una columna "DNI".');
+                alert('⚠️ No se encontró la columna "DNI".');
                 return;
             }
 
-            console.log(`✅ Encabezados detectados en fila: ${headerRowIndex + 1}`);
-
-            // Construir cabeceras combinadas (Fila detectada + Siguiente)
+            // 2. Construir cabeceras
             const primaryHeaders = rawData[headerRowIndex];
-            const secondaryHeaders = rawData[headerRowIndex + 1];
+            const headers = primaryHeaders.map(h => h ? String(h).trim() : '');
             
-            const headers = primaryHeaders.map((h, idx) => {
-                const primary = h ? String(h).trim() : '';
-                const secondary = (secondaryHeaders && secondaryHeaders[idx]) ? String(secondaryHeaders[idx]).trim() : '';
-                return (primary + ' ' + secondary).trim();
-            });
-
-            // ====================================================================
-            // PASO 2: Buscar índice de columnas importantes
-            // ====================================================================
-            const dniColIndex = headers.findIndex(h => 
-                h && h.toUpperCase().includes('DNI')
-            );
-
-            if (dniColIndex === -1) {
-                alert('⚠️ No se encontró la columna DNI en los encabezados.');
-                return;
-            }
-
-            console.log(`✅ Columna DNI en índice: ${dniColIndex}`);
-
-            // ====================================================================
-            // PASO 3: Detectar primera fila con datos reales
-            // ====================================================================
-            let dataStartIndex = headerRowIndex + 1;
-            
-            // Saltar posibles sub-encabezados hasta encontrar un DNI válido
-            for (let i = headerRowIndex + 1; i < Math.min(headerRowIndex + 10, rawData.length); i++) {
-                const row = rawData[i];
-                if (!row) continue;
-                
-                const dniValue = row[dniColIndex];
-                const dniStr = String(dniValue || "").trim();
-                
-                // Verificar si es un DNI real (8-12 dígitos numéricos)
-                if (/^\d{8,12}$/.test(dniStr)) {
-                    dataStartIndex = i;
-                    console.log(`✅ Primera fila de datos en: ${i + 1}`);
-                    break;
-                }
-            }
-
-            // ====================================================================
-            // PASO 4: Procesar TODAS las filas desde dataStartIndex hasta el final
-            // ====================================================================
-            const allRows = rawData.slice(dataStartIndex);
-            
-            console.log(`📊 Procesando ${allRows.length} filas desde la fila ${dataStartIndex + 1}...`);
-
-            // Función para buscar columna de manera flexible
+            // 3. Buscar índices
             const findColIndex = (possibleNames) => {
                 for (const name of possibleNames) {
-                    const normalized = name.toUpperCase()
-                        .normalize("NFD")
-                        .replace(/[\u0300-\u036f]/g, "")
-                        .replace(/\s+/g, " ")
-                        .trim();
-                    
-                    const index = headers.findIndex(h => {
-                        if (!h) return false;
-                        const hNorm = h.toUpperCase()
-                            .normalize("NFD")
-                            .replace(/[\u0300-\u036f]/g, "")
-                            .replace(/\s+/g, " ")
-                            .trim();
-                        return hNorm === normalized || hNorm.includes(normalized);
-                    });
-                    
+                    const normalized = name.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                    const index = headers.findIndex(h => h && h.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalized));
                     if (index !== -1) return index;
                 }
                 return -1;
             };
 
-            // Encontrar índices de columnas
-            const nombreColIndex = findColIndex(['APELLIDOS Y NOMBRES', 'NOMBRES', 'NOMBRE COMPLETO', 'EMPLEADO']);
-            const fechaIngresoColIndex = findColIndex(['F. DE INGRESO', 'F DE INGRESO', 'FECHA DE INGRESO', 'FECHA INGRESO', 'F. INGRESO', 'INGRESO']);
-            const diasGozadosColIndex = findColIndex(['DIAS GOZADOS', 'DIAS GOZADAS', 'VACACIONES GOZADAS', 'GOZADOS']);
+            const dniColIndex = findColIndex(['DNI', 'DOCUMENTO']);
+            const nombreColIndex = findColIndex(['APELLIDOS Y NOMBRES', 'NOMBRES', 'EMPLEADO']);
+            const fechaIngresoColIndex = findColIndex(['INGRESO', 'FECHA DE INGRESO']); // Ajustado para tu Excel
+            const diasGozadosColIndex = findColIndex(['DIAS GOZADOS', 'GOZADOS']);
 
-            console.log(`📍 Índices de columnas:
-  - DNI: ${dniColIndex}
-  - Nombre: ${nombreColIndex}
-  - Fecha Ingreso: ${fechaIngresoColIndex}
-  - Días Gozados: ${diasGozadosColIndex}`);
-
-            // ====================================================================
-            // PASO 5: Mapear y validar cada fila
-            // ====================================================================
+            // 4. Mapear datos
+            const allRows = rawData.slice(headerRowIndex + 1);
             const formatted = allRows.map((row, index) => {
-                if (!row || !Array.isArray(row)) {
-                    return null;
-                }
+                if (!row) return null;
 
-                // Extraer valores
-                const dniRaw = row[dniColIndex];
-                const nombreRaw = nombreColIndex !== -1 ? row[nombreColIndex] : null;
-                const fechaIngresoRaw = fechaIngresoColIndex !== -1 ? row[fechaIngresoColIndex] : null;
-                const diasGozadosRaw = diasGozadosColIndex !== -1 ? row[diasGozadosColIndex] : null;
+                const dni = row[dniColIndex] ? String(row[dniColIndex]).trim() : '';
+                if (!dni || !/^\d{8,12}$/.test(dni)) return null;
 
-                // Procesar DNI
-                const dni = dniRaw ? String(dniRaw).trim() : '';
+                const entryDate = parseExcelDate(fechaIngresoColIndex !== -1 ? row[fechaIngresoColIndex] : null);
                 
-                // Validar DNI (debe ser numérico 8-12 dígitos)
-                if (!dni || !/^\d{8,12}$/.test(dni)) {
-                    return null; // Fila inválida
-                }
-
-                // Procesar fecha
-                const entryDate = parseExcelDate(fechaIngresoRaw);
-
-                // Procesar días gozados
+                // Lógica robusta para días
                 let legacyDays = 0;
-                if (diasGozadosRaw !== null && diasGozadosRaw !== "") {
-                    if (typeof diasGozadosRaw === 'number') {
-                        legacyDays = Math.max(0, Math.round(diasGozadosRaw));
-                    } else if (typeof diasGozadosRaw === 'string') {
-                        const numMatch = String(diasGozadosRaw).match(/[\d.]+/);
-                        if (numMatch) {
-                            legacyDays = Math.max(0, Math.round(parseFloat(numMatch[0])));
-                        }
-                    }
+                const diasRaw = diasGozadosColIndex !== -1 ? row[diasGozadosColIndex] : 0;
+                if (diasRaw) {
+                     const num = parseFloat(String(diasRaw).replace(',', '.'));
+                     if (!isNaN(num)) legacyDays = Math.round(num);
                 }
 
                 return {
@@ -203,21 +158,10 @@ export default function VacationExcelUpload() {
                     dni: dni,
                     entry_date: entryDate,
                     legacy_days: legacyDays,
-                    full_name: nombreRaw ? String(nombreRaw).trim().toUpperCase() : 'DESCONOCIDO',
+                    full_name: nombreColIndex !== -1 ? String(row[nombreColIndex]).trim() : 'DESCONOCIDO',
                     isValid: Boolean(dni && entryDate)
                 };
-            }).filter(item => item !== null); // Eliminar nulls
-
-            const validRecords = formatted.filter(f => f.isValid);
-            
-            console.log(`✅ Total procesado: ${formatted.length}`);
-            console.log(`✅ Registros válidos: ${validRecords.length}`);
-            
-            // Diagnóstico adicional
-            console.log(`\n📦 MUESTRA DE PRIMEROS 3 REGISTROS:`);
-            validRecords.slice(0, 3).forEach((r, i) => {
-                console.log(`  ${i+1}. DNI: ${r.dni}, Días: ${r.legacy_days}, Fecha: ${r.entry_date}`);
-            });
+            }).filter(item => item !== null);
 
             setPreviewData(formatted);
             setUploadResult(null);

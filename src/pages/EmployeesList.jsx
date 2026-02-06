@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { deleteEmployee } from '../services/employees'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
+import EmployeeExcelUpload from './EmployeeExcelUpload'
 import { 
   Search, 
   Download, 
@@ -13,7 +14,8 @@ import {
   Briefcase,
   Edit2,
   Trash2,
-  Store 
+  Store,
+  Upload // Nuevo icono
 } from 'lucide-react'
 
 export default function EmployeesList() {
@@ -27,6 +29,9 @@ export default function EmployeesList() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null })
+  
+  // Estado para el modal de importación
+  const [showImportModal, setShowImportModal] = useState(false)
 
   const sedeMap = {
     'adm-central': 'ADM. CENTRAL',
@@ -105,6 +110,12 @@ export default function EmployeesList() {
     navigate(`/register-employee?${params.toString()}`)
   }
 
+  const handleImportSuccess = () => {
+    setShowImportModal(false)
+    showToast('Empleados importados correctamente', 'success')
+    fetchEmployees() // Recargar lista
+  }
+
   const filteredEmployees = employees.filter(emp => 
     emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     emp.dni.includes(searchTerm)
@@ -112,6 +123,20 @@ export default function EmployeesList() {
 
   return (
     <div className="space-y-6">
+      {/* Modal de Importación */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+                <EmployeeExcelUpload 
+                    onClose={() => setShowImportModal(false)} 
+                    onSuccess={handleImportSuccess}
+                    defaultSede={currentSedeName}
+                    defaultBusinessUnit={businessUnit ? businessUnit.toUpperCase() : null}
+                />
+            </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -131,6 +156,12 @@ export default function EmployeesList() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button 
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium"
+          >
+            <Upload size={18} /> Importar Excel
+          </button>
           <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium">
             <Download size={18} /> Exportar
           </button>

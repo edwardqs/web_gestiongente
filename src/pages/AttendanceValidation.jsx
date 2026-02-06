@@ -25,7 +25,9 @@ export default function AttendanceValidation() {
             
             // También verificar por cargo (position) por si acaso el role interno no se actualizó
             const userPosition = user.position ? user.position.toUpperCase() : ''
-            const isHR = userPosition.includes('ANALISTA DE GENTE') || userPosition.includes('JEFE DE ÁREA')
+            const isHR = userPosition.includes('ANALISTA DE GENTE') || 
+                        userPosition.includes('JEFE DE ÁREA') || 
+                        userPosition.includes('JEFE DE GENTE')
 
             if (!allowedRoles.includes(userRole) && !isHR) {
                 showToast('No tiene permisos para acceder a esta página', 'error')
