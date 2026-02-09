@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
 import EmployeeExcelUpload from './EmployeeExcelUpload'
+import EmployeeProfileCard from '../components/EmployeeProfileCard'
 import { 
   Search, 
   Download, 
@@ -17,7 +18,8 @@ import {
   Edit2,
   Trash2,
   Store,
-  Upload // Nuevo icono
+  Upload,
+  Eye
 } from 'lucide-react'
 
 export default function EmployeesList() {
@@ -33,6 +35,10 @@ export default function EmployeesList() {
   const [searchTerm, setSearchTerm] = useState('')
   const [positionAreaMap, setPositionAreaMap] = useState({}) // Mapa Cargo -> Área
   const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null })
+  
+  // Estado para visualización de perfil
+  const [selectedEmployee, setSelectedEmployee] = useState(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
   
   // Estado para el modal de importación
   const [showImportModal, setShowImportModal] = useState(false)
@@ -150,6 +156,16 @@ export default function EmployeesList() {
     setShowImportModal(false)
     showToast('Empleados importados correctamente', 'success')
     fetchEmployees() // Recargar lista
+  }
+
+  const handleViewProfile = (emp) => {
+    // Enriquecer con nombre de área si tenemos el mapa
+    const enrichedEmp = {
+        ...emp,
+        area_name: positionAreaMap[emp.position]
+    }
+    setSelectedEmployee(enrichedEmp)
+    setShowProfileModal(true)
   }
 
   const filteredEmployees = employees.filter(emp => 
@@ -281,9 +297,17 @@ export default function EmployeesList() {
                   <tr key={emp.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                          {emp.full_name.charAt(0)}
-                        </div>
+                        {emp.profile_picture_url ? (
+                          <img 
+                            src={emp.profile_picture_url} 
+                            alt={emp.full_name}
+                            className="w-10 h-10 rounded-full object-cover border border-gray-200"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
+                            {emp.full_name.charAt(0)}
+                          </div>
+                        )}
                         <div>
                           <p className="font-medium text-gray-900">{emp.full_name}</p>
                           <p className="text-xs text-gray-500">Ingreso: {emp.entry_date}</p>
@@ -318,6 +342,13 @@ export default function EmployeesList() {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button 
+                          onClick={() => handleViewProfile(emp)}
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          title="Ver Perfil"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <button 
                           onClick={() => navigate(`/edit-employee/${emp.id}`)}
                           className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="Editar"
@@ -351,6 +382,17 @@ export default function EmployeesList() {
         onConfirm={modalConfig.onConfirm}
         showCancel
       />
+
+      {/* Modal de Perfil de Empleado */}
+      <Modal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        title="Perfil de Empleado"
+        showCancel={false} // Solo cerrar con X
+        cancelText="Cerrar"
+      >
+         <EmployeeProfileCard employee={selectedEmployee} />
+      </Modal>
     </div>
   )
 }

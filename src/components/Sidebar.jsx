@@ -567,7 +567,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
               </div>
             )}
             <p className="text-[10px] text-gray-300 font-medium">
-              {isCollapsed && !isMobile ? 'v2.0' : '© 2024 Pauser Distribuciones'}
+              {isCollapsed && !isMobile ? 'v2.0' : '© 2026 Pauser Distribuciones'}
             </p>
           </div>
         </div>
