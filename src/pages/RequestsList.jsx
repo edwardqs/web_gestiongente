@@ -389,42 +389,45 @@ export default function RequestsList() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
             <FileText className="text-blue-600" />
-            Solicitudes de Vacaciones
+            Solicitudes
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Gestiona e imprime las papeletas de vacaciones y permisos
+            Gestiona permisos, licencias y vacaciones
           </p>
         </div>
         <button
           onClick={fetchRequests}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium w-full md:w-auto"
         >
           <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
           Actualizar
         </button>
       </div>
 
-      {/* Filtros */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 justify-between">
-        <div className="relative flex-1 max-w-md">
+      {/* Filtros - Grid Layout Robusto */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+        {/* Barra de Búsqueda */}
+        <div className="md:col-span-8 lg:col-span-9 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
             placeholder="Buscar por empleado o DNI..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
           />
         </div>
-        <div className="flex gap-2">
+        
+        {/* Filtro de Estado */}
+        <div className="md:col-span-4 lg:col-span-3">
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:border-blue-500"
+            className="w-full px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-all"
           >
             <option value="ALL">Todos los estados</option>
             <option value="PENDIENTE">Pendientes</option>

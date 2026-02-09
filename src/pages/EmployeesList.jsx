@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { deleteEmployee } from '../services/employees'
 import { getPositions } from '../services/positions'
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
 import EmployeeExcelUpload from './EmployeeExcelUpload'
@@ -23,6 +24,7 @@ export default function EmployeesList() {
   const { sede } = useParams()
   const [searchParams] = useSearchParams()
   const businessUnit = searchParams.get('business')
+  const { user } = useAuth()
   
   const navigate = useNavigate()
   const { showToast } = useToast()
@@ -47,11 +49,25 @@ export default function EmployeesList() {
     'lima': 'LIMA'
   }
 
-  const currentSedeName = sedeMap[sede] || sede
+  // Lógica de seguridad para Sedes
+  // Si NO es Admin, forzar sede del usuario aunque la URL diga otra cosa
+  let currentSedeName = sedeMap[sede] || sede
+  
+  // Seguridad: Sobreescribir si el usuario tiene una sede asignada y NO es admin
+  const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+  
+  if (!isGlobalAdmin && user?.sede) {
+      // Normalizar nombres para comparación
+      const userSedeNorm = user.sede.toUpperCase().trim()
+      if (currentSedeName?.toUpperCase() !== userSedeNorm) {
+          // Si intenta ver otra sede, lo forzamos a la suya
+          currentSedeName = user.sede
+      }
+  }
 
   useEffect(() => {
     fetchEmployees()
-  }, [sede, businessUnit])
+  }, [sede, businessUnit, user]) // Añadir user a deps
 
   const fetchEmployees = async () => {
     setLoading(true)
@@ -62,12 +78,17 @@ export default function EmployeesList() {
         .select('*')
         .order('full_name', { ascending: true })
 
+      // Aplicar filtro de sede (seguro)
       if (currentSedeName) {
         query = query.eq('sede', currentSedeName)
       }
 
-      if (businessUnit) {
-        query = query.eq('business_unit', businessUnit.toUpperCase())
+      // Aplicar filtro de unidad de negocio
+      // Si el usuario no es admin y tiene business_unit asignada, forzar filtro
+      if (!isGlobalAdmin && user?.business_unit) {
+          query = query.eq('business_unit', user.business_unit.toUpperCase())
+      } else if (businessUnit) {
+          query = query.eq('business_unit', businessUnit.toUpperCase())
       }
 
       // 2. Cargar cargos y áreas
@@ -153,7 +174,7 @@ export default function EmployeesList() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
             {currentSedeName === 'ADM. CENTRAL' ? <Building2 className="text-blue-600" /> : <MapPin className="text-blue-600" />}
@@ -170,39 +191,48 @@ export default function EmployeesList() {
             Gestionando {employees.length} empleados en esta área
           </p>
         </div>
-        <div className="flex gap-2">
+        
+        {/* Acciones Responsive: Grid en móvil (2 columnas), Flex en Desktop */}
+        <div className="grid grid-cols-2 sm:flex gap-3 w-full lg:w-auto">
           <button 
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium"
+            className="col-span-1 flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium whitespace-nowrap"
           >
-            <Upload size={18} /> Importar Excel
+            <Upload size={18} /> 
+            <span className="hidden sm:inline">Importar</span>
+            <span className="sm:hidden">Importar</span>
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium">
-            <Download size={18} /> Exportar
+          <button className="col-span-1 flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium whitespace-nowrap">
+            <Download size={18} /> 
+            <span className="hidden sm:inline">Exportar</span>
+            <span className="sm:hidden">Exportar</span>
           </button>
           <button 
             onClick={handleNewEmployee}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm"
+            className="col-span-2 sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm whitespace-nowrap"
           >
-            <UserPlus size={18} /> Nuevo
+            <UserPlus size={18} /> Nuevo Empleado
           </button>
         </div>
       </div>
 
-      {/* Filtros y Búsqueda */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 justify-between">
-        <div className="relative flex-1 max-w-md">
+      {/* Filtros y Búsqueda - Grid Layout Robusto */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+        {/* Barra de Búsqueda (Ocupa más espacio) */}
+        <div className="md:col-span-8 lg:col-span-9 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
           <input 
             type="text"
             placeholder="Buscar por nombre o DNI..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
           />
         </div>
-        <div className="flex gap-2">
-          <select className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:border-blue-500">
+        
+        {/* Filtro de Tipo (Ocupa menos espacio) */}
+        <div className="md:col-span-4 lg:col-span-3">
+          <select className="w-full px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-all">
             <option value="">Todos los tipos</option>
             <option value="ADMINISTRATIVO">Administrativo</option>
             <option value="OPERATIVO">Operativo</option>

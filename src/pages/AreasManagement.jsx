@@ -130,8 +130,8 @@ export default function AreasManagement() {
   const unassignedPositions = filteredPositions.filter(p => !p.area_id)
 
   return (
-    <div className="h-[calc(100vh-6rem)] flex flex-col gap-6">
-      <div className="flex justify-between items-center">
+    <div className="h-[calc(100vh-8rem)] flex flex-col gap-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
             <LayoutGrid className="text-blue-600" />
@@ -142,34 +142,36 @@ export default function AreasManagement() {
           </p>
         </div>
         
-        <form onSubmit={handleCreateArea} className="flex gap-2">
+        <form onSubmit={handleCreateArea} className="flex w-full lg:w-auto gap-2">
           <input
             type="text"
             placeholder="Nueva Área (ej. MARKETING)"
             value={newAreaName}
             onChange={(e) => setNewAreaName(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            className="flex-1 lg:w-64 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
           />
           <button 
             type="submit"
             disabled={!newAreaName.trim()}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
             <Plus size={18} /> Crear Área
           </button>
         </form>
       </div>
 
-      {/* Buscador */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-        <input 
-          type="text"
-          placeholder="Buscar cargo..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-        />
+      {/* Buscador - Grid Pattern Consistent */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div className="relative max-w-md w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input 
+            type="text"
+            placeholder="Buscar cargo..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            />
+        </div>
       </div>
 
       <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4">

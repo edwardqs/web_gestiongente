@@ -142,7 +142,7 @@ export default function RolesManagement() {
   }
 
   return (
-    <div className="h-[calc(100vh-2rem)] flex flex-col md:flex-row gap-6 p-6 max-w-7xl mx-auto">
+    <div className="h-[calc(100vh-8rem)] flex flex-col md:flex-row gap-6">
       
       {/* PANEL IZQUIERDO: LISTA DE ROLES */}
       <div className="w-full md:w-1/3 flex flex-col gap-4">

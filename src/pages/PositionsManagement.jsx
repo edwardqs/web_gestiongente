@@ -117,8 +117,8 @@ export default function PositionsManagement() {
   const employeeTypes = ['ADMINISTRATIVO', 'OPERATIVO', 'COMERCIAL']
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="w-full">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
             <Briefcase className="text-blue-600" /> Gestión de Cargos / Puestos
@@ -129,7 +129,7 @@ export default function PositionsManagement() {
         </div>
         <button
           onClick={openCreateModal}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors w-full md:w-auto shadow-sm"
         >
           <Plus size={18} /> Nuevo Cargo
         </button>
