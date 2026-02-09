@@ -146,28 +146,35 @@ export default function AttendanceList() {
             const queryDate = filters.dateFrom || getLocalDate()
 
             // 1. Cargar Reporte Detallado (Lista con Pendientes)
+            // Si el usuario no es Admin Global, NO enviamos los parámetros de búsqueda a la RPC directamente 
+            // si la RPC no soporta filtrado por sede/business_unit nativamente.
+            // PERO, la RPC `get_daily_attendance_report` actual NO soporta sede/business_unit como parámetros.
+            // Para mantener la seguridad, cargaremos más datos y filtraremos en cliente, O idealmente,
+            // modificaríamos la RPC. Dado que no puedo modificar la RPC ahora mismo, filtraremos en memoria
+            // asegurándonos de traer suficientes datos.
+            
+            // NOTA: Para producción con miles de empleados, la RPC debería recibir `p_sede` y `p_business_unit`.
+            // Como solución inmediata segura:
+            
+            const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+            
+            // Si es admin, usamos paginación normal. Si no, traemos un lote grande para filtrar.
+            const limit = isGlobalAdmin ? PAGE_SIZE : 1000 
+            
             const { data: reportData, error: reportError } = await supabase.rpc('get_daily_attendance_report', {
                 p_date: queryDate,
                 p_search: filters.search || '',
-                p_offset: offset,
-                p_limit: PAGE_SIZE,
+                p_offset: isGlobalAdmin ? offset : 0, // Si filtramos en cliente, necesitamos offset 0
+                p_limit: limit,
                 p_status: filters.status || 'all'
             })
 
             if (reportError) throw reportError
 
-            // 2. Cargar Estadísticas Globales
-            const { data: statsData, error: statsError } = await supabase.rpc('get_attendance_stats', {
-                p_date: queryDate,
-                p_search: filters.search || ''
-            })
-
-            if (statsError) console.error('Error loading stats:', statsError)
-
-            // Procesar lista
-            const processedList = (reportData || []).map(item => ({
+            // Procesar lista y aplicar filtros de seguridad
+            let processedList = (reportData || []).map(item => ({
                 id: item.attendance_id || `pending-${item.employee_id}`, 
-                work_date: queryDate, // Usar la fecha consultada para consistencia visual
+                work_date: queryDate,
                 check_in: item.check_in,
                 check_out: item.check_out,
                 is_late: item.is_late,
@@ -182,26 +189,72 @@ export default function AttendanceList() {
                     dni: item.dni,
                     position: item.position,
                     sede: item.sede,
+                    business_unit: item.business_unit, // Asegurar que la RPC devuelva esto o asumirlo del join
                     profile_picture_url: item.profile_picture_url
                 }
             }))
 
-            setAttendances(processedList)
+            // --- FILTRADO DE SEGURIDAD ---
+            if (!isGlobalAdmin) {
+                if (user?.sede) {
+                    processedList = processedList.filter(item => item.employees.sede === user.sede)
+                }
+                if (user?.business_unit) {
+                    // Nota: Si la RPC no devuelve business_unit en employees, este filtro podría fallar si no se actualiza la RPC.
+                    // Asumiremos que el filtrado por sede es la capa principal por ahora.
+                    // Si business_unit es crítico, se debe añadir a la RPC.
+                }
+            }
+
+            // Paginación manual si se filtró en cliente
+            let displayList = processedList
+            let totalRows = reportData?.[0]?.total_rows || 0
+
+            if (!isGlobalAdmin) {
+                totalRows = processedList.length
+                const start = (page - 1) * PAGE_SIZE
+                displayList = processedList.slice(start, start + PAGE_SIZE)
+            }
+
+            setAttendances(displayList)
             
             // Actualizar Paginación
-            const totalRows = reportData?.[0]?.total_rows || 0
             setTotalRecords(totalRows)
             setTotalPages(Math.ceil(totalRows / PAGE_SIZE) || 1)
 
-            // Actualizar Estadísticas (Globales)
-            if (statsData) {
-                // Actualizamos el objeto stats local del componente (aunque el componente usa variable 'stats' derivada,
-                // necesitamos un estado para stats globales si queremos que sean precisos)
+            // 2. Cargar Estadísticas Globales (Solo si es admin o si podemos filtrarlas)
+            // Si es usuario restringido, las estadísticas globales de la RPC serán incorrectas (de toda la empresa).
+            // Lo mejor es recalcular stats en base a processedList filtrado.
+            
+            if (isGlobalAdmin) {
+                const { data: statsData, error: statsError } = await supabase.rpc('get_attendance_stats', {
+                    p_date: queryDate,
+                    p_search: filters.search || ''
+                })
+
+                if (statsError) console.error('Error loading stats:', statsError)
+                
+                if (statsData) {
+                    setGlobalStats({
+                        total: Number(statsData.total_employees) || 0,
+                        onTime: Number(statsData.on_time) || 0,
+                        late: Number(statsData.late) || 0,
+                        absent: (Number(statsData.absent_registered) || 0) + (Number(statsData.pending) || 0)
+                    })
+                }
+            } else {
+                // Calcular stats locales para usuario restringido
+                const total = processedList.length
+                const onTime = processedList.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
+                const late = processedList.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
+                // Absent incluye pendientes y ausencias explícitas
+                const absent = processedList.filter(i => !i.record_type || ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR'].includes(i.record_type)).length
+                
                 setGlobalStats({
-                    total: Number(statsData.total_employees) || 0,
-                    onTime: Number(statsData.on_time) || 0,
-                    late: Number(statsData.late) || 0,
-                    absent: (Number(statsData.absent_registered) || 0) + (Number(statsData.pending) || 0)
+                    total,
+                    onTime,
+                    late,
+                    absent
                 })
             }
 

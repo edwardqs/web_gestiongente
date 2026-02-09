@@ -1,36 +1,58 @@
 import { supabase } from '../lib/supabase'
 
-export const getRecentActivity = async (limit = 10) => {
+export const getRecentActivity = async (limit = 10, sede = null, businessUnit = null) => {
   try {
     // 1. Obtener Asistencias recientes
-    const { data: attendanceData, error: attendanceError } = await supabase
+    let attQuery = supabase
       .from('attendance')
       .select(`
         *,
-        employees!attendance_employee_id_fkey (
+        employees!attendance_employee_id_fkey!inner (
           full_name,
           profile_picture_url,
-          position
+          position,
+          sede,
+          business_unit
         )
       `)
       .order('created_at', { ascending: false })
       .limit(limit)
+
+    if (sede) {
+        attQuery = attQuery.eq('employees.sede', sede)
+    }
+    if (businessUnit) {
+        attQuery = attQuery.eq('employees.business_unit', businessUnit)
+    }
+
+    const { data: attendanceData, error: attendanceError } = await attQuery
 
     if (attendanceError) throw attendanceError
 
     // 2. Obtener Solicitudes recientes
-    const { data: requestsData, error: requestsError } = await supabase
+    let reqQuery = supabase
       .from('vacation_requests')
       .select(`
         *,
-        employees!vacation_requests_employee_id_fkey (
+        employees!vacation_requests_employee_id_fkey!inner (
           full_name,
           profile_picture_url,
-          position
+          position,
+          sede,
+          business_unit
         )
       `)
       .order('created_at', { ascending: false })
       .limit(limit)
+
+    if (sede) {
+        reqQuery = reqQuery.eq('employees.sede', sede)
+    }
+    if (businessUnit) {
+        reqQuery = reqQuery.eq('employees.business_unit', businessUnit)
+    }
+
+    const { data: requestsData, error: requestsError } = await reqQuery
 
     if (requestsError) throw requestsError
 
@@ -65,7 +87,7 @@ export const getRecentActivity = async (limit = 10) => {
   }
 }
 
-export const subscribeToActivity = (callback) => {
+export const subscribeToActivity = (callback, filters = {}) => {
   // Canal para Asistencias
   const attendanceSub = supabase
     .channel('dashboard-attendance')
@@ -77,7 +99,7 @@ export const subscribeToActivity = (callback) => {
              callback({ id: payload.old.id, deleted: true })
              return
         }
-        await fetchAndCallback(payload.new, callback, false)
+        await fetchAndCallback(payload.new, callback, false, filters)
       }
     )
     .subscribe()
@@ -100,7 +122,7 @@ export const subscribeToActivity = (callback) => {
             notes: `${payload.new.start_date} al ${payload.new.end_date}`,
             is_request: true
         }
-        await fetchAndCallback(normalizedPayload, callback, true)
+        await fetchAndCallback(normalizedPayload, callback, true, filters)
       }
     )
     .subscribe()
@@ -114,11 +136,11 @@ export const subscribeToActivity = (callback) => {
 }
 
 // Helper para obtener datos del empleado y enriquecer el evento
-const fetchAndCallback = async (record, callback, isRequest) => {
+const fetchAndCallback = async (record, callback, isRequest, filters = {}) => {
     try {
         const { data: employeeData, error } = await supabase
         .from('employees')
-        .select('full_name, profile_picture_url, position, email')
+        .select('full_name, profile_picture_url, position, email, sede, business_unit')
         .eq('id', record.employee_id)
         .single()
         
@@ -126,6 +148,10 @@ const fetchAndCallback = async (record, callback, isRequest) => {
             console.error('Error fetching employee details:', error)
             return
         }
+
+        // --- FILTRADO REALTIME ---
+        if (filters.sede && employeeData.sede !== filters.sede) return
+        if (filters.businessUnit && employeeData.business_unit !== filters.businessUnit) return
 
         const enrichedActivity = {
             ...record,

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { getRequests } from '../services/requests'
+import { useAuth } from '../context/AuthContext'
 import { ChevronLeft, ChevronRight, Filter } from 'lucide-react'
 
 const CalendarRequests = () => {
+  const { user } = useAuth()
   const [currentDate, setCurrentDate] = useState(new Date())
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
@@ -20,7 +22,23 @@ const CalendarRequests = () => {
   const fetchRequests = async () => {
     try {
       const { data } = await getRequests()
-      setRequests(data || [])
+      if (data) {
+          let filteredData = data
+          
+          // --- FILTRADO DE SEGURIDAD POR SEDE/UNIDAD ---
+          const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+          
+          if (!isGlobalAdmin) {
+              if (user?.sede) {
+                  filteredData = filteredData.filter(req => req.employees?.sede === user.sede)
+              }
+              if (user?.business_unit) {
+                  filteredData = filteredData.filter(req => req.employees?.business_unit === user.business_unit)
+              }
+          }
+          
+          setRequests(filteredData)
+      }
     } catch (error) {
       console.error("Error cargando solicitudes:", error)
     } finally {

@@ -54,9 +54,11 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     // Lógica para determinar el enlace de "Equipo/Empleados"
     let employeesHref = '#'
     let employeesLabel = 'Empleados'
+    let showEmployeesMenu = true // Por defecto visible
     
     // Si NO es Admin/SuperAdmin/JefeRRHH, redirigir a su sede
     const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+    const isAnalyst = user?.role?.includes('ANALISTA') || user?.position?.includes('ANALISTA')
     
     if (!isGlobalAdmin && user?.sede) {
         employeesLabel = 'Mi Equipo'
@@ -68,9 +70,16 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         if (user?.business_unit) {
             employeesHref += `?business=${user.business_unit.toLowerCase()}`
         }
+
+        // OCULTAR MENÚ PARA ANALISTAS DE GENTE Y GESTIÓN
+        // Si es Analista y tiene sede asignada, se oculta 'Mi Equipo' porque ya usa 'Dptos / Sedes'
+        // Se mantiene visible solo para Jefes Operativos (Ventas, Logística, etc.)
+        if (isAnalyst) {
+            showEmployeesMenu = false
+        }
     }
 
-    return [
+    const items = [
     { 
       id: 'home',
       icon: Home, 
@@ -78,13 +87,14 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: '/', 
       module: 'dashboard' 
     },
-    { 
+    // Solo agregar si debe mostrarse
+    ...(showEmployeesMenu ? [{ 
       id: 'employees',
       icon: Users, 
       label: employeesLabel, 
       href: employeesHref, 
       module: 'employees' 
-    },
+    }] : []),
     { 
       id: 'attendance',
       icon: Clock, 
@@ -179,6 +189,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       ]
     },
   ]
+  return items
   }, [user])
 
   // Función recursiva para encontrar si un item está activo
@@ -287,8 +298,22 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
                     (user?.permissions && user?.permissions['*'])
 
     return menuItems.reduce((acc, item) => {
-      const hasModuleAccess = isAdmin || !item.module || 
+      // 1. Verificar si es Admin o tiene permiso explícito
+      let hasModuleAccess = isAdmin || !item.module || 
                              (user?.permissions && user?.permissions[item.module]?.read)
+
+      // 2. CORRECCIÓN ESPECÍFICA PARA VACACIONES (Analistas y Jefes deben ver)
+      // Si el módulo es 'vacations' y no tiene permiso explícito pero es Analista/Jefe, dar acceso
+      if (item.module === 'vacations' && !hasModuleAccess) {
+          const isAnalystOrBoss = user?.role?.includes('ANALISTA') || 
+                                  user?.role?.includes('JEFE') || 
+                                  user?.position?.includes('ANALISTA') ||
+                                  user?.position?.includes('JEFE') ||
+                                  user?.position?.includes('GERENTE') ||
+                                  user?.position?.includes('COORDINADOR');
+                                  
+          if (isAnalystOrBoss) hasModuleAccess = true;
+      }
 
       if (!hasModuleAccess) return acc
 

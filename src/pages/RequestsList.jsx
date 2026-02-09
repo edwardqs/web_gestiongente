@@ -51,8 +51,23 @@ export default function RequestsList() {
   const fetchRequests = async () => {
     setLoading(true)
     const { data, error } = await getRequests()
-    if (!error) {
-      setRequests(data || [])
+    if (!error && data) {
+      let filteredData = data
+
+      // --- FILTRADO DE SEGURIDAD POR SEDE/UNIDAD ---
+      // Si NO es Admin Global, filtrar por la sede/unidad del usuario logueado
+      const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+      
+      if (!isGlobalAdmin) {
+          if (user?.sede) {
+              filteredData = filteredData.filter(req => req.employees?.sede === user.sede)
+          }
+          if (user?.business_unit) {
+              filteredData = filteredData.filter(req => req.employees?.business_unit === user.business_unit)
+          }
+      }
+      
+      setRequests(filteredData)
     }
     setLoading(false)
   }

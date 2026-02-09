@@ -27,9 +27,19 @@ export default function Dashboard() {
 
   // Cargar actividades iniciales y suscribirse a cambios
   useEffect(() => {
+    // --- FILTRADO DE SEGURIDAD ---
+    const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+    let querySede = null
+    let queryBusinessUnit = null
+    
+    if (!isGlobalAdmin) {
+        querySede = user?.sede
+        queryBusinessUnit = user?.business_unit
+    }
+
     // 1. Cargar datos iniciales
     const loadActivities = async () => {
-      const { data, error } = await getRecentActivity()
+      const { data, error } = await getRecentActivity(10, querySede, queryBusinessUnit)
       if (!error && data) {
         setActivities(data)
       }
@@ -39,13 +49,14 @@ export default function Dashboard() {
 
     // 2. Cargar Estadísticas
     const loadStats = async () => {
-      const { data } = await getDashboardStats()
+      const { data } = await getDashboardStats(querySede, queryBusinessUnit)
       if (data) setStatsData(data)
       setLoadingStats(false)
     }
     loadStats()
 
     // 3. Suscribirse a tiempo real
+    const filters = { sede: querySede, businessUnit: queryBusinessUnit }
     const subscription = subscribeToActivity((payload) => {
       setActivities(prev => {
         // Manejar borrado
@@ -58,13 +69,13 @@ export default function Dashboard() {
         const filtered = prev.filter(a => a.id !== payload.id)
         return [payload, ...filtered].slice(0, 10)
       })
-    })
+    }, filters)
 
     // Cleanup al desmontar
     return () => {
       subscription.unsubscribe()
     }
-  }, [])
+  }, [user])
 
   // Función para formatear hora exacta
   const formatTime = (dateString) => {

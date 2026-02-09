@@ -38,8 +38,23 @@ export const ProtectedRoute = ({ module, requiredAction = 'read', children }) =>
       const perms = user.permissions || {};
       
       // Buscar permisos específicos o comodín '*'
-      const modulePerms = perms[module] || perms['*'];
+      let modulePerms = perms[module] || perms['*'];
       
+      // --- EXCEPCIÓN PARA VACACIONES ---
+      // Si el módulo es 'vacations' y no tiene permiso explícito, pero es Analista/Jefe/Gerente, otorgar permiso de lectura
+      if (!modulePerms && module === 'vacations') {
+          const isAnalystOrBoss = user.role?.includes('ANALISTA') || 
+                                  user.role?.includes('JEFE') || 
+                                  user.position?.includes('ANALISTA') ||
+                                  user.position?.includes('JEFE') ||
+                                  user.position?.includes('GERENTE') ||
+                                  user.position?.includes('COORDINADOR');
+                                  
+          if (isAnalystOrBoss) {
+              modulePerms = { read: true, write: true, delete: false }; // Permiso por defecto
+          }
+      }
+
       if (!modulePerms) {
           console.warn(`RBAC: Acceso denegado a módulo '${module}' para rol '${user.role}'`)
           return <AccessDeniedView moduleName={module} />

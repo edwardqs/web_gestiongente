@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getVacationOverview } from '../services/vacations'
 import { getLocations } from '../services/structure'
+import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import { 
     Search, Filter, AlertTriangle, CheckCircle, 
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react'
 
 export default function VacationDashboard() {
+    const { user } = useAuth()
     const [employees, setEmployees] = useState([])
     const [loading, setLoading] = useState(true)
     const [sedes, setSedes] = useState([])
@@ -35,18 +37,47 @@ export default function VacationDashboard() {
     // Nota: El filtro de estado lo haremos en cliente para evitar llamadas excesivas,
     // pero Sede y Search sí van al RPC para optimizar.
     useEffect(() => {
+        // Si el usuario tiene sede asignada y no es admin, forzar esa sede
+        const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+        
+        if (!isGlobalAdmin && user?.sede) {
+            // Solo cargar si la sede seleccionada coincide con la del usuario (o forzarla)
+            if (selectedSede !== user.sede) {
+                setSelectedSede(user.sede)
+                return // El useEffect se disparará de nuevo al cambiar selectedSede
+            }
+        }
+        
         loadData()
-    }, [selectedSede, searchTerm]) // Debounce idealmente para search
+    }, [selectedSede, searchTerm, user]) // Debounce idealmente para search
 
     const loadData = async () => {
         setLoading(true)
         try {
             // Pasamos searchTerm solo si tiene longitud razonable para no saturar
             const searchParam = searchTerm.length > 2 ? searchTerm : null
-            const { data, error } = await getVacationOverview(selectedSede, searchParam)
+            
+            // --- FILTRADO DE SEGURIDAD ---
+            // Asegurar que si se envía una sede a la API, sea la permitida
+            const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+            let querySede = selectedSede
+            
+            if (!isGlobalAdmin && user?.sede) {
+                querySede = user.sede
+            }
+
+            const { data, error } = await getVacationOverview(querySede, searchParam)
             
             if (error) throw error
-            setEmployees(data || [])
+            
+            let filteredResult = data || []
+            
+            // Filtrado adicional por Business Unit en cliente si aplica
+            if (!isGlobalAdmin && user?.business_unit) {
+                filteredResult = filteredResult.filter(emp => emp.business_unit === user.business_unit)
+            }
+
+            setEmployees(filteredResult)
         } catch (err) {
             console.error("Error cargando vacaciones:", err)
         } finally {
