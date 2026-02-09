@@ -2,23 +2,21 @@
 import { supabase } from '../lib/supabase'
 
 export async function getPositions() {
-  // Obtenemos cargos y hacemos un count de empleados relacionados
-  // Supabase postgrest soporta count en relaciones
+  // Obtenemos cargos, count de empleados y el área asignada
   const { data, error } = await supabase
     .from('job_positions')
-    .select('*, employees(count)')
+    .select('*, employees(count), areas(id, name)')
     .order('name')
 
   if (error) return { data: null, error }
 
-  // Mapeamos para que el count sea un número simple
+  // Mapeamos para que el count sea un número simple y aplanamos area
   const positions = data.map(pos => ({
     ...pos,
-    employee_count: pos.employees ? pos.employees[0]?.count : 0 // Ajuste según respuesta de Supabase count
+    employee_count: pos.employees ? pos.employees[0]?.count : 0,
+    area_name: pos.areas?.name || 'Sin Área Asignada',
+    area_id: pos.areas?.id || null
   }))
-  
-  // Nota: select('*, employees(count)') retorna employees: [{count: N}]
-  // Vamos a verificar si 'employees' llega como array o objeto dependiendo de la versión
   
   return { data: positions, error: null }
 }

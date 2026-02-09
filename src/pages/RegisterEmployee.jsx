@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
@@ -281,8 +281,8 @@ export default function RegisterEmployee() {
         role_id: null // Forzamos null en role_id para evitar conflictos de Foreign Key con la tabla 'roles'
       }
       
-      // Eliminar employee_type si existe, ya que no es columna de employees (está en job_positions)
-      delete dataToSave.employee_type
+      // Ya no eliminamos employee_type porque SÍ es columna de employees
+      // delete dataToSave.employee_type
 
       if (isEditing) {
         await updateEmployee(id, dataToSave)

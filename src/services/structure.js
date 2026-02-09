@@ -1,4 +1,4 @@
-﻿import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 
 export async function getLocations() {
   return await supabase
@@ -31,7 +31,7 @@ export async function getDepartmentsByLocation(locationId) {
 export async function getPositionsByLocationAndDept(locationId, departmentId) {
   const { data, error } = await supabase
     .from('org_structure')
-    .select('job_position_id, job_positions (id, name, default_role_id)')
+    .select('job_position_id, job_positions (id, name, default_role_id, employee_type)')
     .eq('location_id', locationId)
     .eq('department_id', departmentId)
 

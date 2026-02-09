@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { deleteEmployee } from '../services/employees'
+import { getPositions } from '../services/positions'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
 import EmployeeExcelUpload from './EmployeeExcelUpload'
@@ -28,6 +29,7 @@ export default function EmployeesList() {
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [positionAreaMap, setPositionAreaMap] = useState({}) // Mapa Cargo -> Área
   const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null })
   
   // Estado para el modal de importación
@@ -54,6 +56,7 @@ export default function EmployeesList() {
   const fetchEmployees = async () => {
     setLoading(true)
     try {
+      // 1. Cargar empleados
       let query = supabase
         .from('employees')
         .select('*')
@@ -66,6 +69,18 @@ export default function EmployeesList() {
       if (businessUnit) {
         query = query.eq('business_unit', businessUnit.toUpperCase())
       }
+
+      // 2. Cargar cargos y áreas
+      const { data: positionsData } = await getPositions()
+      const areaMap = {}
+      if (positionsData) {
+        positionsData.forEach(pos => {
+            if (pos.area_name && pos.area_name !== 'Sin Área Asignada') {
+                areaMap[pos.name] = pos.area_name
+            }
+        })
+      }
+      setPositionAreaMap(areaMap)
 
       const { data, error } = await query
 
@@ -254,20 +269,20 @@ export default function EmployeesList() {
                         <Briefcase size={14} className="text-gray-400" />
                         <span className="text-sm text-gray-700">{emp.position}</span>
                       </div>
-                      {emp.business_unit && (
+                      {(positionAreaMap[emp.position] || emp.business_unit) && (
                         <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full mt-1 inline-block">
-                          {emp.business_unit}
+                          {positionAreaMap[emp.position] || emp.business_unit}
                         </span>
                       )}
                     </td>
                     <td className="px-6 py-4">
                       <span className={`
                         text-xs font-medium px-2.5 py-1 rounded-full border
-                        ${emp.employee_type === 'ADMINISTRATIVO' 
+                        ${(emp.employee_type || 'OPERATIVO') === 'ADMINISTRATIVO' 
                           ? 'bg-purple-50 text-purple-700 border-purple-100' 
                           : 'bg-orange-50 text-orange-700 border-orange-100'}
                       `}>
-                        {emp.employee_type}
+                        {emp.employee_type || 'OPERATIVO'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">

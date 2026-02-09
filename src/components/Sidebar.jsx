@@ -1,7 +1,6 @@
-import { useState, useRef } from 'react'
-import { Link } from 'react-router-dom' // Importar Link
+import { useState, useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom' // Importar Link y useLocation
 import { useAuth } from '../context/AuthContext'
-import { uploadProfilePicture, updateUserProfilePicture } from '../services/profile'
 import {
   Users,
   Home,
@@ -22,55 +21,75 @@ import {
   Shield, // Icono para Roles
   Plane, // Icono para Vacaciones
   Camera, // Nuevo icono
-  User // Nuevo icono
+  User, // Nuevo icono
+  LayoutGrid // Icono para Áreas
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
-  const { signOut, user, refreshProfile } = useAuth()
-  const fileInputRef = useRef(null)
-  const [isUploading, setIsUploading] = useState(false)
-
+  const { user } = useAuth()
+  const location = useLocation()
+  
   // Estado para manejar qué menús están expandidos por su etiqueta (label)
   const [expandedMenus, setExpandedMenus] = useState({})
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    if (!user?.employee_id) {
-        alert('Error: No se encontró ID de empleado para asociar la imagen.')
-        return
+  // Efecto para expandir automáticamente el menú padre si estamos en una subruta
+  useEffect(() => {
+    const isDescendantActive = (items) => {
+        return items.some(sub => {
+            // Caso 1: Item tiene href directo
+            if (sub.href && sub.href !== '#') {
+                const [path, query] = sub.href.split('?')
+                // Coincidencia exacta de path
+                if (location.pathname === path) {
+                    // Si tiene query params, verificar que existan en la URL actual
+                    if (query) {
+                        return location.search.includes(query)
+                    }
+                    return true
+                }
+            }
+            // Caso 2: Item tiene submenú anidado (Recursión)
+            if (sub.submenu) {
+                return isDescendantActive(sub.submenu)
+            }
+            return false
+        })
     }
 
-    try {
-        setIsUploading(true)
-        // 1. Subir imagen
-        const { publicUrl, error: uploadError } = await uploadProfilePicture(user.employee_id, file)
-        if (uploadError) throw uploadError
+    menuItems.forEach(item => {
+        if (item.submenu) {
+            if (isDescendantActive(item.submenu)) {
+                setExpandedMenus(prev => ({ ...prev, [item.label]: true }))
+            }
+        }
+    })
+  }, [location.pathname, location.search])
 
-        // 2. Actualizar perfil en DB
-        const { error: dbError } = await updateUserProfilePicture(user.employee_id, publicUrl)
-        if (dbError) throw dbError
-
-        // 3. Refrescar contexto
-        if (refreshProfile) refreshProfile()
-        
-    } catch (error) {
-        console.error('Error uploading profile picture:', error)
-        alert('Error al subir la foto de perfil')
-    } finally {
-        setIsUploading(false)
-        // Limpiar input
-        if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
-
-  const toggleMenu = (label) => {
+  const toggleMenu = (label, level) => {
     if (isCollapsed) setIsCollapsed(false)
-    setExpandedMenus(prev => ({
-      ...prev,
-      [label]: !prev[label]
-    }))
+    
+    setExpandedMenus(prev => {
+        // Si estamos en el primer nivel (level 0), cerramos otros menús de primer nivel
+        if (level === 0) {
+            const newState = {} // Empezamos limpio (acordeón estricto para nivel 0)
+            
+            // Mantenemos abiertos los submenús internos si estamos cerrando el padre actual
+            // Pero como es un toggle simple, si prev[label] es true -> false, todo se cierra.
+            // Si prev[label] es false -> true, abrimos este y cerramos los demás.
+            
+            if (!prev[label]) {
+                newState[label] = true
+            }
+            return newState
+        }
+        
+        // Para niveles profundos, comportamiento normal (toggle independiente)
+        // Opcional: Podríamos implementar acordeón también aquí si se desea
+        return {
+            ...prev,
+            [label]: !prev[label]
+        }
+    })
   }
 
   const menuItems = [
@@ -135,7 +154,8 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       module: 'settings',
       submenu: [
         { label: 'Usuarios y Permisos', icon: Shield, href: '/roles' },
-        { label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' }
+        { label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' },
+        { label: 'Gestión de Áreas', icon: LayoutGrid, href: '/areas' }
       ]
     },
   ]
@@ -178,45 +198,88 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     const isExpanded = expandedMenus[item.label]
     const Icon = item.icon
 
-    // Cálculo de indentación dinámica
-    const paddingLeft = level === 0 ? 'px-3' : level === 1 ? 'pl-10 pr-3' : 'pl-14 pr-3'
+    // Verificar si está activo (Lógica mejorada)
+    const isActive = !hasSubmenu && (() => {
+        if (!item.href || item.href === '#') return false
+        
+        // Separar path y query
+        const [targetPath, targetQuery] = item.href.split('?')
+        const currentPath = location.pathname
+        
+        // Coincidencia exacta de path
+        const isPathMatch = currentPath === targetPath || (targetPath !== '/' && currentPath.startsWith(targetPath))
+        
+        // Si hay query params, deben coincidir también
+        if (targetQuery && isPathMatch) {
+            return location.search.includes(targetQuery)
+        }
+        
+        return isPathMatch
+    })()
+
+    // Cálculo de indentación y estilos según nivel
+    const paddingLeft = level === 0 ? 'px-3' : level === 1 ? 'pl-4 pr-3' : 'pl-8 pr-3'
+    const fontSize = level === 0 ? 'text-[15px]' : 'text-[14px]'
 
     // Si tiene submenú es un botón toggle, si no es un Link
     const Component = hasSubmenu ? 'button' : Link
     const props = hasSubmenu
-      ? { onClick: () => toggleMenu(item.label), type: 'button' }
-      : { to: item.href } // Link usa 'to', no 'href'
+      ? { onClick: () => toggleMenu(item.label, level), type: 'button' }
+      : { to: item.href }
 
     return (
-      <div className="w-full">
+      <div className="w-full mb-1">
         <Component
           {...props}
           className={`
-            w-full flex items-center gap-3 py-2.5 text-gray-600 rounded-lg transition-colors group relative
+            w-full flex items-center gap-3 py-2.5 rounded-xl transition-all duration-200 group relative
             ${paddingLeft}
             ${isCollapsed && level === 0 ? 'justify-center px-0' : ''}
-            ${hasSubmenu && isExpanded ? 'text-blue-600 bg-blue-50' : 'hover:bg-blue-50 hover:text-blue-600'}
+            
+            /* Estilos condicionales */
+            ${isActive 
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50' 
+                : hasSubmenu && isExpanded 
+                    ? 'bg-blue-50/80 text-blue-700 font-semibold' 
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+            }
           `}
           title={isCollapsed ? item.label : ''}
         >
+          {/* Indicador visual para subniveles activos (Línea o Punto) */}
+          {level > 0 && (
+             <div className={`
+                absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full transition-all
+                ${isActive ? 'bg-blue-400' : 'bg-transparent'}
+             `}></div>
+          )}
+
           {Icon && (
             <Icon
               size={level === 0 ? 22 : 18}
               className={`
                 ${level === 0 ? 'min-w-[22px]' : 'min-w-[18px]'} 
-                ${isExpanded ? 'text-blue-600' : 'text-gray-500 group-hover:text-blue-600'}
+                ${isActive ? 'text-white' : (isExpanded ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600')}
               `}
+              strokeWidth={isActive ? 2.5 : 2}
             />
+          )}
+
+          {!Icon && level > 0 && (
+            <div className={`
+                w-1.5 h-1.5 rounded-full mr-1 transition-colors
+                ${isActive ? 'bg-white' : 'bg-gray-300 group-hover:bg-gray-400'}
+            `}></div>
           )}
 
           {!isCollapsed && (
             <>
-              <span className={`font-medium whitespace-nowrap flex-1 text-left ${level > 0 ? 'text-sm' : ''}`}>
+              <span className={`whitespace-nowrap flex-1 text-left ${fontSize} ${isActive ? 'font-medium' : ''}`}>
                 {item.label}
               </span>
               {hasSubmenu && (
-                <span className="text-gray-400">
-                  {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                <span className={`transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''} ${isExpanded ? 'text-blue-600' : 'text-gray-400'}`}>
+                  <ChevronDown size={16} />
                 </span>
               )}
             </>
@@ -224,8 +287,11 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         </Component>
 
         {/* Renderizado Recursivo del Submenú */}
-        {!isCollapsed && hasSubmenu && isExpanded && (
-          <div className="space-y-1 mt-1">
+        {!isCollapsed && hasSubmenu && (
+          <div className={`
+            overflow-hidden transition-all duration-300 ease-in-out space-y-1 mt-1
+            ${isExpanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}
+          `}>
             {item.submenu.map((subItem, index) => (
               <MenuItem key={index} item={subItem} level={level + 1} />
             ))}
@@ -240,7 +306,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       {/* Overlay para móvil */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-20 lg:hidden"
           onClick={() => setIsOpen(false)}
         />
       )}
@@ -248,30 +314,53 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 left-0 z-30 h-screen bg-white border-r border-gray-200 transition-all duration-300 ease-in-out overflow-y-auto overflow-x-hidden scrollbar-hide
+          fixed top-0 left-0 z-30 h-screen bg-white border-r border-gray-100 shadow-xl shadow-gray-200/50 transition-all duration-300 ease-[cubic-bezier(0.25,0.8,0.25,1)]
+          overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent
           ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           ${isCollapsed ? 'w-20' : 'w-64'}
         `}
       >
         <div className="flex flex-col min-h-full">
           {/* Header del Sidebar */}
-          <div className={`flex items-center h-16 px-4 border-b border-gray-100 sticky top-0 bg-white z-10 ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
-            {!isCollapsed && <span className="text-xl font-bold text-blue-600 whitespace-nowrap">PAUSER RRHH</span>}
+          <div className={`flex items-center h-20 px-6 mb-2 ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+            {!isCollapsed && (
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-200">
+                        <span className="text-white font-bold text-lg">P</span>
+                    </div>
+                    <span className="text-xl font-bold text-gray-800 tracking-tight">PAUSER</span>
+                </div>
+            )}
+            {isCollapsed && (
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-200">
+                    <span className="text-white font-bold text-lg">P</span>
+                </div>
+            )}
 
             <div className="flex items-center">
               {/* Botón colapsar (Desktop) */}
               <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
-                className="hidden lg:flex p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-blue-600 transition-colors"
-                title={isCollapsed ? "Expandir menú" : "Colapsar menú"}
+                className={`hidden lg:flex p-2 rounded-xl text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition-colors ${isCollapsed ? 'hidden' : ''}`}
+                title="Colapsar menú"
               >
-                {isCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+                <PanelLeftClose size={20} />
               </button>
+
+              {/* Botón expandir (Cuando está colapsado) */}
+              {isCollapsed && (
+                  <button
+                    onClick={() => setIsCollapsed(false)}
+                    className="hidden lg:absolute lg:flex -right-3 top-8 bg-white border border-gray-200 p-1.5 rounded-full shadow-md text-gray-500 hover:text-blue-600 z-50"
+                  >
+                      <ChevronRight size={14} />
+                  </button>
+              )}
 
               {/* Botón cerrar (Móvil) */}
               <button
                 onClick={() => setIsOpen(false)}
-                className="lg:hidden p-1 ml-2 rounded-md hover:bg-gray-100 text-gray-500"
+                className="lg:hidden p-2 ml-2 rounded-xl hover:bg-gray-100 text-gray-500"
               >
                 <X size={20} />
               </button>
@@ -279,91 +368,23 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
           </div>
 
           {/* Menú de Navegación */}
-          <nav className="flex-1 px-3 py-6 space-y-1">
+          <nav className="flex-1 px-4 py-4 space-y-1">
             {visibleMenuItems.map((item, index) => (
               <MenuItem key={index} item={item} level={0} />
             ))}
           </nav>
 
-          {/* Footer del Sidebar (Usuario y Logout) */}
-          <div className="p-3 border-t border-gray-100 mt-auto sticky bottom-0 bg-white">
-            <div className={`flex flex-col items-center gap-2 mb-3 ${isCollapsed ? '' : 'px-2'}`}>
-                {/* Avatar con botón de subida */}
-                <div className="relative group">
-                    <div className={`
-                        relative overflow-hidden rounded-full border-2 border-gray-100 shadow-sm
-                        ${isCollapsed ? 'w-10 h-10' : 'w-16 h-16'}
-                    `}>
-                        {user?.profile?.profile_picture_url ? (
-                            <img 
-                                src={user.profile.profile_picture_url} 
-                                alt="Perfil" 
-                                className="w-full h-full object-cover"
-                            />
-                        ) : (
-                            <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                                {user?.full_name ? user.full_name.charAt(0).toUpperCase() : <User size={isCollapsed ? 20 : 32} />}
-                            </div>
-                        )}
-                        
-                        {/* Overlay de carga */}
-                        {isUploading && (
-                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Botón de cámara (Solo visible en hover y si no está colapsado o si se decide permitir en colapsado) */}
-                    <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`
-                            absolute bottom-0 right-0 bg-white text-gray-600 p-1.5 rounded-full shadow-md border border-gray-200 hover:text-blue-600 hover:border-blue-300 transition-all
-                            ${isUploading ? 'hidden' : 'opacity-0 group-hover:opacity-100'}
-                            ${isCollapsed ? 'scale-75 -bottom-1 -right-1' : ''}
-                        `}
-                        title="Cambiar foto"
-                    >
-                        <Camera size={14} />
-                    </button>
+          {/* Footer del Sidebar (Logo o Versión) */}
+          <div className="p-6 mt-auto text-center">
+             {!isCollapsed && (
+                <div className="bg-blue-50 rounded-2xl p-4 mb-4">
+                    <p className="text-xs font-semibold text-blue-800 mb-1">Pauser RRHH v2.0</p>
+                    <p className="text-[10px] text-blue-600/70">Gestión de Personal</p>
                 </div>
-
-                {/* Info de Usuario */}
-                {!isCollapsed && (
-                    <div className="text-center w-full">
-                        <p className="text-sm font-bold text-gray-900 truncate px-1">
-                            {user?.full_name || 'Usuario'}
-                        </p>
-                        <p className="text-xs text-gray-500 truncate px-1" title={user?.email}>
-                            {user?.email}
-                        </p>
-                        <p className="text-[10px] text-blue-600 font-medium mt-0.5 bg-blue-50 inline-block px-2 py-0.5 rounded-full">
-                            {user?.position || user?.role || 'Personal'}
-                        </p>
-                    </div>
-                )}
-            </div>
-
-            <button
-              onClick={signOut}
-              className={`
-                w-full flex items-center gap-3 px-2 py-2 text-red-600 rounded-lg hover:bg-red-50 transition-colors
-                ${isCollapsed ? 'justify-center' : ''}
-              `}
-              title={isCollapsed ? 'Cerrar Sesión' : ''}
-            >
-              <LogOut size={20} className="min-w-[20px]" />
-              {!isCollapsed && <span className="font-medium whitespace-nowrap">Cerrar Sesión</span>}
-            </button>
-
-            {/* Input oculto para subir archivo */}
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                accept="image/png, image/jpeg, image/jpg, image/webp"
-                onChange={handleFileChange}
-            />
+             )}
+             <p className="text-[10px] text-gray-300 font-medium">
+                {isCollapsed ? 'v2.0' : '© 2024 Pauser Distribuciones'}
+             </p>
           </div>
         </div>
       </aside>

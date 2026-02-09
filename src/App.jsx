@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider } from './context/ToastContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -11,13 +11,14 @@ import RequestsList from './pages/RequestsList'
 import CalendarRequests from './pages/CalendarRequests'
 import RolesManagement from './pages/RolesManagement'
 import PositionsManagement from './pages/PositionsManagement'
+import AreasManagement from './pages/AreasManagement'
 import VacationDashboard from './pages/VacationDashboard'
 import VacationExcelUpload from './pages/VacationExcelUpload'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
 
-// Componente para proteger rutas privadas
-const PrivateRoute = ({ children }) => {
+// Layout Wrapper para rutas privadas
+const PrivateLayout = () => {
   const { session, loading } = useAuth()
   const location = useLocation()
 
@@ -33,7 +34,11 @@ const PrivateRoute = ({ children }) => {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  return <DashboardLayout>{children}</DashboardLayout>
+  return (
+    <DashboardLayout>
+      <Outlet />
+    </DashboardLayout>
+  )
 }
 
 function App() {
@@ -44,110 +49,96 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
 
-            <Route path="/" element={
-              <PrivateRoute>
+            {/* Rutas Privadas con Layout Persistente */}
+            <Route element={<PrivateLayout />}>
+              <Route path="/" element={
                 <ProtectedRoute module="dashboard">
                   <Dashboard />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            <Route path="/register-employee" element={
-              <PrivateRoute>
+              <Route path="/register-employee" element={
                 <ProtectedRoute module="employees" requiredAction="write">
                   <RegisterEmployee />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para editar empleado */}
-            <Route path="/edit-employee/:id" element={
-              <PrivateRoute>
+              {/* Ruta para editar empleado */}
+              <Route path="/edit-employee/:id" element={
                 <ProtectedRoute module="employees" requiredAction="write">
                   <RegisterEmployee />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta dinámica para listar empleados por sede */}
-            <Route path="/employees/:sede" element={
-              <PrivateRoute>
+              {/* Ruta dinámica para listar empleados por sede */}
+              <Route path="/employees/:sede" element={
                 <ProtectedRoute module="employees">
                   <EmployeesList />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para ver lista de asistencias */}
-            <Route path="/attendance-list" element={
-              <PrivateRoute>
+              {/* Ruta para ver lista de asistencias */}
+              <Route path="/attendance-list" element={
                 <ProtectedRoute module="attendance">
                   <AttendanceList />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para lista de solicitudes */}
-            <Route path="/requests" element={
-              <PrivateRoute>
+              {/* Ruta para lista de solicitudes */}
+              <Route path="/requests" element={
                 <ProtectedRoute module="requests">
                   <RequestsList />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para calendario de solicitudes */}
-            <Route path="/calendar" element={
-              <PrivateRoute>
+              {/* Ruta para calendario de solicitudes */}
+              <Route path="/calendar" element={
                 <ProtectedRoute module="calendar">
                   <CalendarRequests />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para gestión de roles */}
-            <Route path="/roles" element={
-              <PrivateRoute>
+              {/* Ruta para gestión de roles */}
+              <Route path="/roles" element={
                 <ProtectedRoute module="settings">
                   <RolesManagement />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para gestión de cargos */}
-            <Route path="/positions" element={
-              <PrivateRoute>
-                <ProtectedRoute module="settings">
+              {/* Gestión de Cargos */}
+              <Route path="/positions" element={
+                <ProtectedRoute module="config">
                   <PositionsManagement />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Ruta para ver Papeleta de Vacaciones */}
-            <Route path="/papeleta/:id" element={
-              <PrivateRoute>
+              {/* Gestión de Áreas */}
+              <Route path="/areas" element={
+                <ProtectedRoute module="config">
+                  <AreasManagement />
+                </ProtectedRoute>
+              } />
+
+              {/* Ruta para ver Papeleta de Vacaciones */}
+              <Route path="/papeleta/:id" element={
                 <ProtectedRoute module="requests">
                   <PapeletaVacaciones />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
 
-            {/* Rutas de Gestión de Vacaciones */}
-            <Route path="/vacaciones" element={
-              <PrivateRoute>
+              {/* Rutas de Gestión de Vacaciones */}
+              <Route path="/vacaciones" element={
                 <ProtectedRoute module="vacations">
                   <VacationDashboard />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
-            
-            <Route path="/vacaciones/carga-masiva" element={
-              <PrivateRoute>
+              } />
+              
+              <Route path="/vacaciones/carga-masiva" element={
                 <ProtectedRoute module="vacations" requiredAction="write">
                   <VacationExcelUpload />
                 </ProtectedRoute>
-              </PrivateRoute>
-            } />
+              } />
+            </Route>
 
             {/* Redirigir cualquier otra ruta a home */}
             <Route path="*" element={<Navigate to="/" />} />
