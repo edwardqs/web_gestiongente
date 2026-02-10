@@ -49,12 +49,19 @@ export const AuthProvider = ({ children }) => {
         if (session?.user) {
              // Solo activar loading si NO es un refresco de token Y no tenemos usuario cargado
              // Esto evita que la pantalla parpadee o se reinicie el estado al minimizar/restaurar la ventana
-             if (event !== 'TOKEN_REFRESHED' && !userRef.current) {
-                 setLoading(true);
-             }
              
-             // Llamar a fetchProfile para asegurar datos frescos y completos
-             fetchProfile(session.user);
+             // CORRECCIÓN: Evitar recargar perfil en TOKEN_REFRESHED si ya tenemos usuario
+             // Esto previene que la app se refresque sola al minimizar/restaurar navegador
+             const isTokenRefresh = event === 'TOKEN_REFRESHED';
+             const hasUserLoaded = !!userRef.current;
+
+             if (!isTokenRefresh || !hasUserLoaded) {
+                 if (!hasUserLoaded) {
+                     setLoading(true);
+                 }
+                 // Llamar a fetchProfile para asegurar datos frescos y completos
+                 fetchProfile(session.user);
+             }
         }
       } 
     })
@@ -211,8 +218,8 @@ export const AuthProvider = ({ children }) => {
       return await supabase.auth.signOut()
     },
     // Exponer función para recargar perfil manualmente si es necesario
-    refreshProfile: () => {
-        if (session?.user) fetchProfile(session.user)
+    refreshProfile: async () => {
+        if (session?.user) await fetchProfile(session.user)
     }
   }
 

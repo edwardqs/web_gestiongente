@@ -12,6 +12,20 @@ export const getVacationOverview = async (sede, search) => {
 }
 
 /**
+ * Obtiene las solicitudes de vacaciones de un empleado específico
+ */
+export const getEmployeeVacationRequests = async (employeeId) => {
+    const { data, error } = await supabase
+        .from('vacation_requests')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .eq('request_type', 'VACACIONES')
+        .neq('status', 'RECHAZADA')
+    
+    return { data, error }
+}
+
+/**
  * Carga masiva de datos históricos de vacaciones con BATCHING AUTOMÁTICO
  * El usuario sube 1 archivo, el sistema lo procesa en lotes internos.
  */

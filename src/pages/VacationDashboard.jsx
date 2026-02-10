@@ -1,65 +1,189 @@
 import { useState, useEffect } from 'react'
 import { getVacationOverview } from '../services/vacations'
-import { getLocations } from '../services/structure'
+import { getLocations, getDepartmentsByLocation } from '../services/structure'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import VacationCalendar from '../components/VacationCalendar'
 import { 
     Search, Filter, AlertTriangle, CheckCircle, 
-    Calendar, Calculator, Clock, Briefcase, MapPin 
+    Calendar, Calculator, Clock, Briefcase, MapPin, Store
 } from 'lucide-react'
+
+// Constante para la clave de localStorage
+const FILTERS_STORAGE_KEY = 'vacation_dashboard_filters'
 
 export default function VacationDashboard() {
     const { user } = useAuth()
     const [employees, setEmployees] = useState([])
     const [loading, setLoading] = useState(true)
     const [sedes, setSedes] = useState([])
+    const [businessUnits, setBusinessUnits] = useState([])
     
-    // Filtros
-    const [selectedSede, setSelectedSede] = useState('')
-    const [searchTerm, setSearchTerm] = useState('')
-    const [statusFilter, setStatusFilter] = useState('all')
+    // Helper para determinar si el usuario es admin global
+    const isGlobalAdmin = user?.role === 'ADMIN' || 
+                          user?.role === 'SUPER ADMIN' || 
+                          user?.role === 'JEFE_RRHH' || 
+                          (user?.permissions && user?.permissions['*'])
+
+    // Función para cargar filtros guardados del localStorage
+    const loadSavedFilters = () => {
+        try {
+            const saved = localStorage.getItem(FILTERS_STORAGE_KEY)
+            if (saved) {
+                const parsed = JSON.parse(saved)
+                // Validar que los datos guardados sean del mismo usuario
+                if (parsed.userId === user?.id) {
+                    return parsed.filters
+                }
+            }
+        } catch (error) {
+            console.error('Error cargando filtros guardados:', error)
+        }
+        return null
+    }
+
+    // Función para guardar filtros en localStorage
+    const saveFilters = (filters) => {
+        try {
+            localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify({
+                userId: user?.id,
+                filters: filters,
+                timestamp: Date.now()
+            }))
+        } catch (error) {
+            console.error('Error guardando filtros:', error)
+        }
+    }
+
+    // Inicializar filtros con valores guardados o valores por defecto
+    const initializeFilters = () => {
+        const savedFilters = loadSavedFilters()
+        
+        // Si hay filtros guardados y el usuario es admin, usarlos
+        if (savedFilters && isGlobalAdmin) {
+            return {
+                sede: savedFilters.sede || '',
+                businessUnit: savedFilters.businessUnit || '',
+                search: savedFilters.search || '',
+                status: savedFilters.status || 'all'
+            }
+        }
+        
+        // Si el usuario tiene restricciones, aplicarlas
+        return {
+            sede: (!isGlobalAdmin && user?.sede) ? user.sede : (savedFilters?.sede || ''),
+            businessUnit: (!isGlobalAdmin && user?.business_unit) ? user.business_unit : (savedFilters?.businessUnit || ''),
+            search: savedFilters?.search || '',
+            status: savedFilters?.status || 'all'
+        }
+    }
+
+    const initialFilters = initializeFilters()
+
+    // Filtros - Inicializados con valores persistidos
+    const [selectedSede, setSelectedSede] = useState(initialFilters.sede)
+    const [selectedBusinessUnit, setSelectedBusinessUnit] = useState(initialFilters.businessUnit)
+    const [searchTerm, setSearchTerm] = useState(initialFilters.search)
+    const [statusFilter, setStatusFilter] = useState(initialFilters.status)
 
     // Modal
     const [selectedEmployee, setSelectedEmployee] = useState(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
+    
+    // Modal Calendario
+    const [calendarEmployee, setCalendarEmployee] = useState(null)
+    const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
-    // Cargar datos iniciales
+    // Guardar filtros cada vez que cambien
+    useEffect(() => {
+        if (user?.id) {
+            const filters = {
+                sede: selectedSede,
+                businessUnit: selectedBusinessUnit,
+                search: searchTerm,
+                status: statusFilter
+            }
+            saveFilters(filters)
+        }
+    }, [selectedSede, selectedBusinessUnit, searchTerm, statusFilter, user?.id])
+
+    // 1. Cargar datos iniciales
     useEffect(() => {
         const fetchInitial = async () => {
             const { data: locs } = await getLocations()
-            if (locs) setSedes(locs)
-            loadData()
+            if (locs) {
+                setSedes(locs)
+            }
+
+            if (!isGlobalAdmin && user?.sede) {
+                setSelectedSede(user.sede)
+            }
+
+            if (!isGlobalAdmin && user?.business_unit) {
+                setSelectedBusinessUnit(user.business_unit)
+            }
         }
         fetchInitial()
-    }, [])
+    }, [user?.id]) 
 
-    // Cargar empleados cuando cambian filtros de API (Sede/Search)
-    // Nota: El filtro de estado lo haremos en cliente para evitar llamadas excesivas,
-    // pero Sede y Search sí van al RPC para optimizar.
+    // 2. Cargar Business Units cuando cambia la sede seleccionada
     useEffect(() => {
-        // Si el usuario tiene sede asignada y no es admin, forzar esa sede
-        const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
-        
-        if (!isGlobalAdmin && user?.sede) {
-            // Solo cargar si la sede seleccionada coincide con la del usuario (o forzarla)
-            if (selectedSede !== user.sede) {
-                setSelectedSede(user.sede)
-                return // El useEffect se disparará de nuevo al cambiar selectedSede
+        let isMounted = true
+
+        const fetchBusinessUnits = async () => {
+            if (!selectedSede) {
+                setBusinessUnits([])
+                return
+            }
+
+            const sedeObj = sedes.find(s => s.name === selectedSede)
+            if (!sedeObj) return
+
+            const currentSelection = selectedBusinessUnit 
+
+            const { data, error } = await getDepartmentsByLocation(sedeObj.id)
+            
+            if (error) console.error("Error cargando unidades de negocio:", error)
+            
+            if (isMounted && data) {
+                setBusinessUnits(data)
+                
+                if (!isGlobalAdmin && user?.business_unit) {
+                    const buExists = data.some(bu => bu.name === user.business_unit)
+                    if (buExists) {
+                         if (currentSelection !== user.business_unit) {
+                             setSelectedBusinessUnit(user.business_unit)
+                         }
+                    } else {
+                        setSelectedBusinessUnit('')
+                    }
+                } else {
+                    const selectionStillValid = currentSelection && data.some(bu => bu.name === currentSelection)
+                    
+                    if (!selectionStillValid && currentSelection) {
+                        setSelectedBusinessUnit('')
+                    }
+                }
             }
         }
         
+        if (sedes.length > 0) {
+            fetchBusinessUnits()
+        }
+
+        return () => { isMounted = false }
+    }, [selectedSede, sedes, isGlobalAdmin, user?.business_unit])
+
+    // 3. Cargar empleados cuando cambian filtros relevantes
+    useEffect(() => {
+        if (sedes.length === 0) return
         loadData()
-    }, [selectedSede, searchTerm, user]) // Debounce idealmente para search
+    }, [selectedSede, searchTerm, selectedBusinessUnit, sedes, user?.sede, user?.business_unit])
 
     const loadData = async () => {
         setLoading(true)
         try {
-            // Pasamos searchTerm solo si tiene longitud razonable para no saturar
             const searchParam = searchTerm.length > 2 ? searchTerm : null
-            
-            // --- FILTRADO DE SEGURIDAD ---
-            // Asegurar que si se envía una sede a la API, sea la permitida
-            const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
             let querySede = selectedSede
             
             if (!isGlobalAdmin && user?.sede) {
@@ -72,9 +196,14 @@ export default function VacationDashboard() {
             
             let filteredResult = data || []
             
-            // Filtrado adicional por Business Unit en cliente si aplica
-            if (!isGlobalAdmin && user?.business_unit) {
-                filteredResult = filteredResult.filter(emp => emp.business_unit === user.business_unit)
+            if (selectedBusinessUnit) {
+                filteredResult = filteredResult.filter(emp => 
+                    emp.business_unit === selectedBusinessUnit
+                )
+            } else if (!isGlobalAdmin && user?.business_unit) {
+                filteredResult = filteredResult.filter(emp => 
+                    emp.business_unit === user.business_unit
+                )
             }
 
             setEmployees(filteredResult)
@@ -102,6 +231,11 @@ export default function VacationDashboard() {
         setIsModalOpen(true)
     }
 
+    const handleOpenCalendar = (emp) => {
+        setCalendarEmployee(emp)
+        setIsCalendarOpen(true)
+    }
+
     const getStatusBadge = (status) => {
         switch(status) {
             case 'danger': 
@@ -112,6 +246,37 @@ export default function VacationDashboard() {
                 return <span className="px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center gap-1"><CheckCircle size={12} /> AL DÍA</span>
         }
     }
+
+    const handleSedeChange = (e) => {
+        const newSede = e.target.value
+        if (!isGlobalAdmin && user?.sede && newSede !== user.sede && newSede !== '') {
+            console.warn('Usuario no autorizado para cambiar de sede')
+            return
+        }
+        setSelectedSede(newSede)
+    }
+
+    const handleClearFilters = () => {
+        const defaultSede = (!isGlobalAdmin && user?.sede) ? user.sede : ''
+        const defaultBU = (!isGlobalAdmin && user?.business_unit) ? user.business_unit : ''
+        
+        setSelectedSede(defaultSede)
+        setSelectedBusinessUnit(defaultBU)
+        setSearchTerm('')
+        setStatusFilter('all')
+        
+        try {
+            localStorage.removeItem(FILTERS_STORAGE_KEY)
+        } catch (error) {
+            console.error('Error limpiando filtros:', error)
+        }
+    }
+
+    const sedeDisabled = !isGlobalAdmin && !!user?.sede
+    const businessUnitDisabled = !selectedSede || businessUnits.length === 0 || (!isGlobalAdmin && !!user?.business_unit)
+
+    const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || 
+                            (isGlobalAdmin && (selectedSede !== '' || selectedBusinessUnit !== ''))
 
     return (
         <div className="space-y-6 p-6 bg-slate-50 min-h-screen">
@@ -144,51 +309,114 @@ export default function VacationDashboard() {
             </div>
 
             {/* Filtros */}
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end md:items-center">
-                <div className="w-full md:w-64">
-                    <label className="text-xs font-semibold text-slate-500 mb-1 block">Buscar</label>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                        <input 
-                            type="text" 
-                            placeholder="Nombre o DNI..." 
-                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                {/* MODIFICADO: items-end para alinear abajo inputs y botón */}
+                <div className="flex flex-col md:flex-row gap-4 items-end">
+                    
+                    {/* Buscador */}
+                    <div className="w-full md:w-64">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Buscar</label>
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <input 
+                                type="text" 
+                                placeholder="Nombre o DNI..." 
+                                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
                     </div>
-                </div>
 
-                <div className="w-full md:w-48">
-                    <label className="text-xs font-semibold text-slate-500 mb-1 block">Sede</label>
-                    <div className="relative">
-                        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                        <select 
-                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none"
-                            value={selectedSede}
-                            onChange={(e) => setSelectedSede(e.target.value)}
-                        >
-                            <option value="">Todas las Sedes</option>
-                            {sedes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                        </select>
+                    {/* Sede */}
+                    {/* MODIFICADO: relative para contener mensajes absolutos */}
+                    <div className="w-full md:w-48 relative">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Sede</label>
+                        <div className="relative">
+                            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <select 
+                                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                value={selectedSede}
+                                onChange={handleSedeChange}
+                                disabled={sedeDisabled}
+                            >
+                                <option value="">Todas las Sedes</option>
+                                {sedes.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                            </select>
+                        </div>
+                        {sedeDisabled && (
+                            <p className="absolute top-full left-0 w-full text-[10px] text-slate-400 mt-1 ml-1 truncate z-10">
+                                Restringido a: {user?.sede}
+                            </p>
+                        )}
                     </div>
-                </div>
 
-                <div className="w-full md:w-48">
-                    <label className="text-xs font-semibold text-slate-500 mb-1 block">Estado</label>
-                    <div className="relative">
-                        <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                        <select 
-                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none"
-                            value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value)}
-                        >
-                            <option value="all">Todos</option>
-                            <option value="safe">Al Día</option>
-                            <option value="warning">Alerta (+15 días)</option>
-                            <option value="danger">Crítico (+30 días)</option>
-                        </select>
+                    {/* Unidad de Negocio */}
+                    {/* MODIFICADO: relative y mensajes absolutos */}
+                    <div className="w-full md:w-48 relative">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Unidad de Negocio</label>
+                        <div className="relative">
+                            <Store className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <select 
+                                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                value={selectedBusinessUnit}
+                                onChange={(e) => setSelectedBusinessUnit(e.target.value)}
+                                disabled={businessUnitDisabled}
+                            >
+                                <option value="">Todas</option>
+                                {businessUnits.map(bu => <option key={bu.id} value={bu.name}>{bu.name}</option>)}
+                            </select>
+                        </div>
+                        
+                        {/* Mensajes Flotantes (Absolute) */}
+                        {!selectedSede && (
+                            <p className="absolute top-full left-0 w-full text-[10px] text-slate-400 mt-1 ml-1 z-10">
+                                Seleccione una sede primero
+                            </p>
+                        )}
+                        {businessUnits.length === 0 && selectedSede && (
+                            <p className="absolute top-full left-0 w-full text-[10px] text-amber-500 mt-1 ml-1 z-10">
+                                No hay unidades disponibles
+                            </p>
+                        )}
+                        {!isGlobalAdmin && user?.business_unit && (
+                            <p className="absolute top-full left-0 w-full text-[10px] text-slate-400 mt-1 ml-1 truncate z-10">
+                                Restringido a: {user?.business_unit}
+                            </p>
+                        )}
                     </div>
+
+                    {/* Estado */}
+                    <div className="w-full md:w-48">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Estado</label>
+                        <div className="relative">
+                            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <select 
+                                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm appearance-none"
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                            >
+                                <option value="all">Todos</option>
+                                <option value="safe">Al Día</option>
+                                <option value="warning">Alerta (+15 días)</option>
+                                <option value="danger">Crítico (+30 días)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* Botón Limpiar Filtros */}
+                    {/* MODIFICADO: Simplificado para alinearse correctamente con items-end */}
+                    {hasActiveFilters && (
+                        <div className="w-full md:w-auto">
+                            <button
+                                onClick={handleClearFilters}
+                                className="w-full md:w-auto px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors flex items-center justify-center gap-2 h-[38px]"
+                            >
+                                <Filter size={16} />
+                                Limpiar Filtros
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -200,6 +428,7 @@ export default function VacationDashboard() {
                             <tr>
                                 <th className="px-6 py-4 font-bold">Empleado</th>
                                 <th className="px-6 py-4 font-bold">Sede / Cargo</th>
+                                <th className="px-6 py-4 font-bold">Unidad de Negocio</th>
                                 <th className="px-6 py-4 font-bold text-center">Ingreso</th>
                                 <th className="px-6 py-4 font-bold text-center">Ganados</th>
                                 <th className="px-6 py-4 font-bold text-center">Consumidos</th>
@@ -211,7 +440,7 @@ export default function VacationDashboard() {
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan="8" className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan="9" className="px-6 py-8 text-center text-slate-400">
                                         <div className="flex justify-center items-center gap-2">
                                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                                             Cargando datos...
@@ -220,7 +449,7 @@ export default function VacationDashboard() {
                                 </tr>
                             ) : filteredData.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan="9" className="px-6 py-8 text-center text-slate-400">
                                         No se encontraron registros.
                                     </td>
                                 </tr>
@@ -235,6 +464,9 @@ export default function VacationDashboard() {
                                                 <span className="font-medium text-slate-700">{emp.sede}</span>
                                                 <span className="text-xs text-slate-400">{emp.position}</span>
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-600">
+                                            {emp.business_unit || '-'}
                                         </td>
                                         <td className="px-6 py-4 text-center text-slate-500">
                                             {emp.entry_date}
@@ -259,12 +491,21 @@ export default function VacationDashboard() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <button 
-                                                onClick={() => handleOpenKardex(emp)}
-                                                className="text-blue-600 hover:text-blue-800 font-medium text-xs border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
-                                            >
-                                                Ver Detalle
-                                            </button>
+                                            <div className="flex items-center justify-end gap-2">
+                                                <button 
+                                                    onClick={() => handleOpenCalendar(emp)}
+                                                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
+                                                    title="Ver Calendario"
+                                                >
+                                                    <Calendar size={18} />
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleOpenKardex(emp)}
+                                                    className="text-blue-600 hover:text-blue-800 font-medium text-xs border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
+                                                >
+                                                    Ver Detalle
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
@@ -347,6 +588,19 @@ export default function VacationDashboard() {
                             </p>
                         </div>
                     </div>
+                )}
+            </Modal>
+
+            {/* Modal Calendario */}
+            <Modal
+                isOpen={isCalendarOpen}
+                onClose={() => setIsCalendarOpen(false)}
+                title={calendarEmployee ? `Calendario de Vacaciones - ${calendarEmployee.full_name}` : "Calendario de Vacaciones"}
+                cancelText="Cerrar"
+                showCancel={true}
+            >
+                {calendarEmployee && (
+                    <VacationCalendar employeeId={calendarEmployee.employee_id} />
                 )}
             </Modal>
         </div>

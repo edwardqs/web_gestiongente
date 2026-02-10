@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { bulkUpdateVacations } from '../services/vacations'
-import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Save, RefreshCw, X } from 'lucide-react'
+import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Save, RefreshCw, X, Download } from 'lucide-react'
 
 export default function VacationExcelUpload() {
     const [file, setFile] = useState(null)
@@ -9,6 +9,40 @@ export default function VacationExcelUpload() {
     const [loading, setLoading] = useState(false)
     const [uploadResult, setUploadResult] = useState(null)
     const fileInputRef = useRef(null)
+
+    const handleDownloadTemplate = () => {
+        const headers = [
+            'SEDE',
+            'DNI',
+            'APELLIDOS Y NOMBRES',
+            'FECHA DE INGRESO',
+            'DIAS GANADOS',
+            'DIAS GOZADOS',
+            'DIAS PENDIENTES POR GOZAR'
+        ];
+
+        // Crear hoja de trabajo
+        const ws = XLSX.utils.aoa_to_sheet([headers]);
+
+        // Ajustar ancho de columnas para mejor visualización
+        const wscols = [
+            { wch: 15 }, // SEDE
+            { wch: 15 }, // DNI
+            { wch: 40 }, // APELLIDOS Y NOMBRES
+            { wch: 20 }, // FECHA DE INGRESO
+            { wch: 15 }, // DIAS GANADOS
+            { wch: 15 }, // DIAS GOZADOS
+            { wch: 25 }  // DIAS PENDIENTES POR GOZAR
+        ];
+        ws['!cols'] = wscols;
+
+        // Crear libro y agregar la hoja
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Plantilla_Carga");
+
+        // Descargar archivo
+        XLSX.writeFile(wb, "formato_carga_vacaciones.xlsx");
+    };
 
     const handleFileChange = (e) => {
         const selectedFile = e.target.files[0]
@@ -255,6 +289,14 @@ const readExcel = (file) => {
                     <h1 className="text-2xl font-bold text-slate-800">Carga Masiva de Histórico</h1>
                     <p className="text-slate-500 text-sm">Actualiza fechas de ingreso y días consumidos (Excel)</p>
                 </div>
+                
+                <button
+                    onClick={handleDownloadTemplate}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                >
+                    <Download size={18} />
+                    Descargar Formato
+                </button>
             </div>
 
             {/* Zona de Carga */}

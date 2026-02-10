@@ -73,7 +73,8 @@ export default function EmployeesList() {
 
   useEffect(() => {
     fetchEmployees()
-  }, [sede, businessUnit, user]) // Añadir user a deps
+  }, [sede, businessUnit, user?.sede, user?.business_unit, user?.role]) // Usar propiedades específicas en lugar de objeto user completo
+
 
   const fetchEmployees = async () => {
     setLoading(true)

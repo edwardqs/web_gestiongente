@@ -31,6 +31,24 @@ export async function validateAttendance({
 }
 
 /**
+ * Carga masiva de asistencias
+ */
+export async function bulkImportAttendance(records) {
+    try {
+        const { data, error } = await supabase.rpc('bulk_import_attendance', {
+            p_records: records
+        })
+
+        if (error) throw error
+
+        return data
+    } catch (error) {
+        console.error('Error en bulkImportAttendance:', error)
+        throw error
+    }
+}
+
+/**
  * Registra una asistencia manualmente
  */
 export async function registerManualAttendance({

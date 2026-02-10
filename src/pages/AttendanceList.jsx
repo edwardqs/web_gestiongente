@@ -1,32 +1,98 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { Calendar, Clock, Filter, Search, CheckCircle, XCircle, AlertCircle, MapPin, X, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { Calendar, Clock, Filter, Search, CheckCircle, XCircle, AlertCircle, MapPin, X, ChevronLeft, ChevronRight, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import Modal from '../components/ui/Modal'
+import { bulkImportAttendance } from '../services/attendance'
+
+// Constante para la clave de persistencia
+const ATTENDANCE_FILTERS_KEY = 'attendance_list_filters'
 
 export default function AttendanceList() {
     const { user } = useAuth()
     const [attendances, setAttendances] = useState([])
     const [loading, setLoading] = useState(true)
-    const [exporting, setExporting] = useState(false) // Nuevo estado para exportación
+    const [exporting, setExporting] = useState(false)
     const [selectedLocation, setSelectedLocation] = useState(null)
     const [reasonModal, setReasonModal] = useState(null)
     const [validationModal, setValidationModal] = useState(null)
     const [validationNotes, setValidationNotes] = useState('')
     const [validating, setValidating] = useState(false)
     
+    // Importación Masiva
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+    const [importFile, setImportFile] = useState(null)
+    const [importPreview, setImportPreview] = useState([])
+    const [importLoading, setImportLoading] = useState(false)
+    const [importResult, setImportResult] = useState(null)
+    const fileInputRef = useRef(null)
+
     // Paginación
     const [currentPage, setCurrentPage] = useState(1)
     const [totalPages, setTotalPages] = useState(1)
     const [totalRecords, setTotalRecords] = useState(0)
     const PAGE_SIZE = 20
 
-    const [filters, setFilters] = useState({
-        status: 'all', // all, on_time, late, absent
-        dateFrom: '',
-        dateTo: '',
-        search: ''
-    })
+    // Helper para obtener fecha local en formato YYYY-MM-DD
+    const getLocalDate = () => {
+        const d = new Date()
+        const year = d.getFullYear()
+        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = String(d.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+    }
+
+    // Cargar filtros guardados
+    const loadSavedFilters = () => {
+        try {
+            const saved = localStorage.getItem(ATTENDANCE_FILTERS_KEY)
+            if (saved) {
+                const parsed = JSON.parse(saved)
+                if (parsed.userId === user?.id) {
+                    return parsed.filters
+                }
+            }
+        } catch (error) {
+            console.error('Error cargando filtros:', error)
+        }
+        return null
+    }
+
+    // Guardar filtros
+    const saveFilters = (filters) => {
+        try {
+            localStorage.setItem(ATTENDANCE_FILTERS_KEY, JSON.stringify({
+                userId: user?.id,
+                filters: filters,
+                timestamp: Date.now()
+            }))
+        } catch (error) {
+            console.error('Error guardando filtros:', error)
+        }
+    }
+
+    // Inicializar filtros con fecha actual por defecto
+    const initializeFilters = () => {
+        const savedFilters = loadSavedFilters()
+        const today = getLocalDate()
+        
+        return {
+            status: savedFilters?.status || 'all',
+            dateFrom: savedFilters?.dateFrom || today, // Por defecto: hoy
+            dateTo: savedFilters?.dateTo || '', // Sin fecha final por defecto
+            search: savedFilters?.search || ''
+        }
+    }
+
+    const [filters, setFilters] = useState(initializeFilters())
+
+    // Guardar filtros cuando cambien
+    useEffect(() => {
+        if (user?.id) {
+            saveFilters(filters)
+        }
+    }, [filters, user?.id])
 
     // Verificar permisos de validación (Solo RRHH)
     const canValidate = () => {
@@ -47,71 +113,26 @@ export default function AttendanceList() {
         const allowedPositions = [
             'ANALISTA DE GENTE Y GESTION',
             'JEFE DE AREA DE GENTE Y GESTION',
-            'JEFE DE GENTE Y GESTION', // Nueva variante
-            'JEFE DE GENTE Y GESTIÓN', // Con tilde explícita
+            'JEFE DE GENTE Y GESTION',
+            'JEFE DE GENTE Y GESTIÓN',
             'ADMIN'
         ]
         
-        // Verificar coincidencia exacta o parcial (includes) para mayor flexibilidad
         return allowedPositions.some(pos => userPosition.includes(normalize(pos)))
     }
 
     const hasValidationPermission = canValidate()
     
-    // Ref para controlar la primera carga y evitar duplicados
+    // Ref para controlar la primera carga
     const isFirstRender = useRef(true)
-
-    useEffect(() => {
-        // Cuando cambian los filtros:
-        // Si estamos en página 1, recargamos manualmente.
-        // Si no, volvemos a la 1 (esto disparará el efecto de currentPage).
-        if (currentPage === 1) {
-            loadAttendances(1)
-        } else {
-            setCurrentPage(1)
-        }
-    }, [filters])
-
-    useEffect(() => {
-        // Evitar doble carga en el montaje inicial (ya lo maneja el efecto de filtros)
-        if (isFirstRender.current) {
-            isFirstRender.current = false
-            return
-        }
-        
-        // Cargar datos cuando cambia la página
-        loadAttendances(currentPage)
-    }, [currentPage])
-
-    // Escuchar actualizaciones en tiempo real para refrescar la lista
-    useEffect(() => {
-        const subscription = supabase
-            .channel('attendance_list_updates')
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'attendance' },
-                () => {
-                    // Si hay cualquier cambio en la tabla attendance, recargamos la página actual
-                    loadAttendances(currentPage)
-                }
-            )
-            .subscribe()
-
-        return () => {
-            subscription.unsubscribe()
-        }
-    }, [currentPage, filters]) // Dependencias para que recargue con los filtros actuales
 
     // Helper para aplicar filtros
     const applyFilters = (query, currentFilters) => {
         if (currentFilters.status === 'on_time') {
-            // Solo asistencias marcadas como no tarde
             query = query.eq('record_type', 'ASISTENCIA').eq('is_late', false)
         } else if (currentFilters.status === 'late') {
-            // Solo asistencias marcadas como tarde
             query = query.eq('record_type', 'ASISTENCIA').eq('is_late', true)
         } else if (currentFilters.status === 'absent') {
-             // Cualquier tipo de ausencia o falta (incluyendo registros antiguos sin check_in)
              query = query.or('record_type.in.(AUSENCIA,INASISTENCIA,FALTA JUSTIFICADA,AUSENCIA SIN JUSTIFICAR),check_in.is.null')
         } else if (currentFilters.status === 'medical') {
             query = query.eq('record_type', 'DESCANSO MÉDICO')
@@ -121,95 +142,228 @@ export default function AttendanceList() {
             query = query.eq('record_type', 'VACACIONES')
         }
 
-        if (currentFilters.dateFrom) query = query.gte('work_date', currentFilters.dateFrom)
-        if (currentFilters.dateTo) query = query.lte('work_date', currentFilters.dateTo)
+        // CRÍTICO: Aplicar filtros de fecha correctamente
+        if (currentFilters.dateFrom) {
+            query = query.gte('work_date', currentFilters.dateFrom)
+        }
+        if (currentFilters.dateTo) {
+            query = query.lte('work_date', currentFilters.dateTo)
+        }
         
         return query
     }
 
-    // Helper para obtener fecha local en formato YYYY-MM-DD
-    const getLocalDate = () => {
-        const d = new Date()
-        const year = d.getFullYear()
-        const month = String(d.getMonth() + 1).padStart(2, '0')
-        const day = String(d.getDate()).padStart(2, '0')
-        return `${year}-${month}-${day}`
-    }
+    useEffect(() => {
+        // Cuando cambian los filtros, volver a página 1
+        if (currentPage === 1) {
+            loadAttendances(1)
+        } else {
+            setCurrentPage(1)
+        }
+    }, [filters])
+
+    useEffect(() => {
+        // Evitar doble carga en el montaje inicial
+        if (isFirstRender.current) {
+            isFirstRender.current = false
+            return
+        }
+        
+        loadAttendances(currentPage)
+    }, [currentPage])
+
+    // Escuchar actualizaciones en tiempo real
+    useEffect(() => {
+        const subscription = supabase
+            .channel('attendance_list_updates')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'attendance' },
+                () => {
+                    loadAttendances(currentPage)
+                }
+            )
+            .subscribe()
+
+        return () => {
+            subscription.unsubscribe()
+        }
+    }, [currentPage, filters])
 
     async function loadAttendances(page = 1) {
         try {
             setLoading(true)
             
             const offset = (page - 1) * PAGE_SIZE
-            
-            // Usar fecha local para evitar problemas de zona horaria (UTC vs Local)
-            const queryDate = filters.dateFrom || getLocalDate()
+            const isGlobalAdmin = (
+                user?.role === 'ADMIN' || 
+                user?.role === 'SUPER ADMIN' || 
+                user?.role === 'JEFE_RRHH' || 
+                user?.position?.includes('JEFE DE GENTE') ||
+                user?.position?.includes('JEFE DE RRHH') ||
+                (user?.permissions && user?.permissions['*'])
+            ) && !user?.position?.includes('ANALISTA'); // Asegurar que Analistas SIEMPRE pasen por filtro de sede
 
-            // 1. Cargar Reporte Detallado (Lista con Pendientes)
-            // Si el usuario no es Admin Global, NO enviamos los parámetros de búsqueda a la RPC directamente 
-            // si la RPC no soporta filtrado por sede/business_unit nativamente.
-            // PERO, la RPC `get_daily_attendance_report` actual NO soporta sede/business_unit como parámetros.
-            // Para mantener la seguridad, cargaremos más datos y filtraremos en cliente, O idealmente,
-            // modificaríamos la RPC. Dado que no puedo modificar la RPC ahora mismo, filtraremos en memoria
-            // asegurándonos de traer suficientes datos.
-            
-            // NOTA: Para producción con miles de empleados, la RPC debería recibir `p_sede` y `p_business_unit`.
-            // Como solución inmediata segura:
-            
-            const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
-            
-            // Si es admin, usamos paginación normal. Si no, traemos un lote grande para filtrar.
-            const limit = isGlobalAdmin ? PAGE_SIZE : 1000 
-            
-            const { data: reportData, error: reportError } = await supabase.rpc('get_daily_attendance_report', {
-                p_date: queryDate,
-                p_search: filters.search || '',
-                p_offset: isGlobalAdmin ? offset : 0, // Si filtramos en cliente, necesitamos offset 0
-                p_limit: limit,
-                p_status: filters.status || 'all'
-            })
+            console.log('User Role:', user?.role, 'Position:', user?.position, 'Is Global Admin:', isGlobalAdmin)
 
-            if (reportError) throw reportError
+            // SIEMPRE usar consulta histórica (rango de fechas) en lugar de RPC diaria
+            // Esto permite ver cualquier rango de fechas, no solo "hoy"
+            let isSingleDate = filters.dateFrom && filters.dateTo && filters.dateFrom === filters.dateTo
+            let reportData = []
+            let totalRows = 0
+
+            // MODO REPORTE DIARIO (Roster)
+            // Si se selecciona una fecha única, mostramos TODOS los empleados y su estado
+            if (isSingleDate) {
+                console.log('Loading Daily Roster Mode for:', filters.dateFrom)
+                
+                // Determinar sede/business unit para la RPC
+                let rpcSede = null
+                let rpcBusinessUnit = null
+                
+                if (!isGlobalAdmin) {
+                    if (user?.sede) rpcSede = user.sede
+                    if (user?.business_unit) rpcBusinessUnit = user.business_unit
+                }
+
+                const { data: rpcData, error: rpcError } = await supabase.rpc('get_daily_attendance_report', {
+                    p_date: filters.dateFrom,
+                    p_sede: rpcSede,
+                    p_business_unit: rpcBusinessUnit,
+                    p_search: filters.search || null,
+                    p_status: filters.status === 'all' ? null : filters.status,
+                    p_page: page,
+                    p_limit: PAGE_SIZE
+                })
+
+                if (rpcError) throw rpcError
+
+                if (rpcData && rpcData.data) {
+                    reportData = rpcData.data
+                    totalRows = rpcData.total || 0
+                }
+
+                // Mapear al formato esperado por la tabla
+                let processedList = reportData.map(item => ({
+                    id: item.attendance_id || `virtual-${item.employee_id}`, // ID virtual si no hay asistencia
+                    work_date: filters.dateFrom,
+                    check_in: item.check_in,
+                    check_out: item.check_out,
+                    is_late: item.is_late || false,
+                    record_type: item.record_type || 'SIN REGISTRO',
+                    status: item.computed_status, // present, absent, late, on_time
+                    validated: item.validated,
+                    absence_reason: item.absence_reason,
+                    location_in: item.location_in,
+                    employees: {
+                        full_name: item.full_name,
+                        dni: item.dni,
+                        position: item.position,
+                        sede: item.sede,
+                        business_unit: item.business_unit,
+                        profile_picture_url: item.profile_picture_url
+                    }
+                }))
+
+                setAttendances(processedList)
+                setTotalRecords(totalRows)
+                setTotalPages(Math.ceil(totalRows / PAGE_SIZE))
+                setLoading(false)
+                return // Salir, ya cargamos los datos
+            }
+
+            // MODO HISTÓRICO (Rango de Fechas)
+            let query = supabase
+                .from('attendance')
+                .select(`
+                    *,
+                    employees!attendance_employee_id_fkey (
+                        full_name,
+                        dni,
+                        position,
+                        sede,
+                        business_unit,
+                        profile_picture_url
+                    )
+                `, { count: 'exact' })
+                .order('work_date', { ascending: false })
+                .order('check_in', { ascending: true })
+
+            // Aplicar filtros de fecha
+            if (filters.dateFrom) {
+                query = query.gte('work_date', filters.dateFrom)
+            }
+            if (filters.dateTo) {
+                query = query.lte('work_date', filters.dateTo)
+            }
+
+            // Si NO hay filtro de fecha "desde", usar el mes actual por defecto
+            if (!filters.dateFrom && !filters.dateTo) {
+                const today = getLocalDate()
+                const firstDayOfMonth = today.substring(0, 8) + '01' // YYYY-MM-01
+                query = query.gte('work_date', firstDayOfMonth)
+            }
+
+            // Aplicar filtros de estado
+            query = applyFilters(query, filters)
+
+            // Búsqueda por texto (optimizada para evitar errores de Supabase con joins)
+            // Nota: La búsqueda en campos anidados (employees.*) no funciona directamente en el filtro
+            // Se filtrará en memoria después de la consulta
+
+            // Paginación
+            if (isGlobalAdmin) {
+                query = query.range(offset, offset + PAGE_SIZE - 1)
+            } else {
+                // Para usuarios restringidos, traemos más datos para filtrar localmente
+                query = query.limit(1000)
+            }
+
+            const { data, error, count } = await query
+            if (error) throw error
+            
+            reportData = data || []
+            totalRows = count || 0
 
             // Procesar lista y aplicar filtros de seguridad
-            let processedList = (reportData || []).map(item => ({
-                id: item.attendance_id || `pending-${item.employee_id}`, 
-                work_date: queryDate,
+            let processedList = reportData.map(item => ({
+                id: item.id,
+                work_date: item.work_date,
                 check_in: item.check_in,
                 check_out: item.check_out,
                 is_late: item.is_late,
                 record_type: item.record_type,
-                status: item.status,
+                status: item.status || (item.check_in ? 'present' : 'absent'),
                 validated: item.validated,
                 notes: item.notes,
+                absence_reason: item.absence_reason,
                 evidence_url: item.evidence_url,
                 location_in: item.location_in,
-                employees: { 
-                    full_name: item.full_name,
-                    dni: item.dni,
-                    position: item.position,
-                    sede: item.sede,
-                    business_unit: item.business_unit, // Asegurar que la RPC devuelva esto o asumirlo del join
-                    profile_picture_url: item.profile_picture_url
-                }
+                validated_by: item.validated_by,
+                employees: item.employees || {}
             }))
 
-            // --- FILTRADO DE SEGURIDAD ---
+            // Filtrado de seguridad por sede/business unit
             if (!isGlobalAdmin) {
                 if (user?.sede) {
                     processedList = processedList.filter(item => item.employees.sede === user.sede)
                 }
                 if (user?.business_unit) {
-                    // Nota: Si la RPC no devuelve business_unit en employees, este filtro podría fallar si no se actualiza la RPC.
-                    // Asumiremos que el filtrado por sede es la capa principal por ahora.
-                    // Si business_unit es crítico, se debe añadir a la RPC.
+                    processedList = processedList.filter(item => item.employees.business_unit === user.business_unit)
                 }
+            }
+
+            // Filtrado por búsqueda (en memoria, después de traer los datos)
+            if (filters.search && filters.search.length > 0) {
+                const searchLower = filters.search.toLowerCase()
+                processedList = processedList.filter(item => 
+                    item.employees?.full_name?.toLowerCase().includes(searchLower) ||
+                    item.employees?.dni?.toLowerCase().includes(searchLower)
+                )
             }
 
             // Paginación manual si se filtró en cliente
             let displayList = processedList
-            let totalRows = reportData?.[0]?.total_rows || 0
-
             if (!isGlobalAdmin) {
                 totalRows = processedList.length
                 const start = (page - 1) * PAGE_SIZE
@@ -217,45 +371,32 @@ export default function AttendanceList() {
             }
 
             setAttendances(displayList)
-            
-            // Actualizar Paginación
             setTotalRecords(totalRows)
             setTotalPages(Math.ceil(totalRows / PAGE_SIZE) || 1)
 
-            // 2. Cargar Estadísticas Globales (Solo si es admin o si podemos filtrarlas)
-            // Si es usuario restringido, las estadísticas globales de la RPC serán incorrectas (de toda la empresa).
-            // Lo mejor es recalcular stats en base a processedList filtrado.
-            
+            // Calcular estadísticas
             if (isGlobalAdmin) {
-                const { data: statsData, error: statsError } = await supabase.rpc('get_attendance_stats', {
-                    p_date: queryDate,
-                    p_search: filters.search || ''
-                })
-
-                if (statsError) console.error('Error loading stats:', statsError)
-                
-                if (statsData) {
-                    setGlobalStats({
-                        total: Number(statsData.total_employees) || 0,
-                        onTime: Number(statsData.on_time) || 0,
-                        late: Number(statsData.late) || 0,
-                        absent: (Number(statsData.absent_registered) || 0) + (Number(statsData.pending) || 0)
-                    })
-                }
-            } else {
-                // Calcular stats locales para usuario restringido
+                // Para admin, calcular stats de los datos filtrados
                 const total = processedList.length
                 const onTime = processedList.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
                 const late = processedList.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
-                // Absent incluye pendientes y ausencias explícitas
-                const absent = processedList.filter(i => !i.record_type || ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR'].includes(i.record_type)).length
+                const absent = processedList.filter(i => 
+                    !i.record_type || 
+                    ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR'].includes(i.record_type)
+                ).length
                 
-                setGlobalStats({
-                    total,
-                    onTime,
-                    late,
-                    absent
-                })
+                setGlobalStats({ total, onTime, late, absent })
+            } else {
+                // Para usuario restringido, usar processedList completo (ya filtrado)
+                const total = processedList.length
+                const onTime = processedList.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
+                const late = processedList.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
+                const absent = processedList.filter(i => 
+                    !i.record_type || 
+                    ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR'].includes(i.record_type)
+                ).length
+                
+                setGlobalStats({ total, onTime, late, absent })
             }
 
         } catch (error) {
@@ -266,7 +407,7 @@ export default function AttendanceList() {
         }
     }
 
-    // Nuevo estado para stats globales
+    // Estado para stats globales
     const [globalStats, setGlobalStats] = useState({
         total: 0,
         onTime: 0,
@@ -278,42 +419,58 @@ export default function AttendanceList() {
         try {
             setExporting(true)
             
-            // Definir rango de fechas
-            // Si no hay fechas seleccionadas, usar el mes actual por defecto
+            // Usar las fechas de los filtros actuales
             let startDate = filters.dateFrom
             let endDate = filters.dateTo
 
-            if (!startDate || !endDate) {
+            // Si no hay fechas, usar el mes actual
+            if (!startDate) {
                 const now = new Date()
                 const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-                const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-                
-                if (!startDate) startDate = firstDay.toISOString().split('T')[0]
-                if (!endDate) endDate = lastDay.toISOString().split('T')[0]
+                startDate = firstDay.toISOString().split('T')[0]
             }
 
-            // Usar la nueva RPC para exportación masiva
-            const { data: exportData, error } = await supabase.rpc('get_attendance_export_report', {
-                p_start_date: startDate,
-                p_end_date: endDate,
-                p_status: filters.status || 'all'
-            })
+            if (!endDate) {
+                const now = new Date()
+                const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+                endDate = lastDay.toISOString().split('T')[0]
+            }
+
+            // Consulta directa (sin RPC) para obtener todos los datos del rango
+            let query = supabase
+                .from('attendance')
+                .select(`
+                    *,
+                    employees!attendance_employee_id_fkey (
+                        full_name,
+                        dni,
+                        position,
+                        sede,
+                        business_unit
+                    )
+                `)
+                .gte('work_date', startDate)
+                .lte('work_date', endDate)
+                .order('work_date', { ascending: false })
+
+            query = applyFilters(query, filters)
+
+            const { data: exportData, error } = await query
 
             if (error) throw error
 
-            // Filtrar localmente por búsqueda si es necesario (la RPC no tiene búsqueda por texto para ser más rápida)
+            // Filtrar por búsqueda si es necesario
             let filteredExportData = exportData || []
             if (filters.search) {
                 const searchLower = filters.search.toLowerCase()
                 filteredExportData = filteredExportData.filter(item => 
-                    item.full_name?.toLowerCase().includes(searchLower) || 
-                    item.dni?.toLowerCase().includes(searchLower)
+                    item.employees?.full_name?.toLowerCase().includes(searchLower) || 
+                    item.employees?.dni?.toLowerCase().includes(searchLower)
                 )
             }
 
             // Formatear datos para Excel
             const formattedData = filteredExportData.map(item => {
-                // Logic helpers for Excel (Strings instead of JSX)
                 const getStatusText = (i) => {
                     const t = i.record_type;
                     if (t === 'ASISTENCIA') return i.is_late ? 'TARDANZA' : 'PUNTUAL';
@@ -321,8 +478,7 @@ export default function AttendanceList() {
                     if (t === 'DESCANSO MÉDICO') return 'DESCANSO MÉDICO';
                     if (t === 'LICENCIA CON GOCE') return 'LICENCIA';
                     if (t === 'VACACIONES') return 'VACACIONES';
-                    if (!i.attendance_id && !t) return 'AUSENTE (PENDIENTE)'; // Diferenciar pendiente
-                    return t || 'AUSENTE'; // Fallback para registros nulos en modo 'absent'
+                    return t || 'AUSENTE';
                 };
 
                 const getTypeText = (i) => {
@@ -338,16 +494,16 @@ export default function AttendanceList() {
 
                 return {
                     'Fecha': item.work_date,
-                    'Empleado': item.full_name || 'Desconocido',
-                    'DNI': item.dni || '',
-                    'Cargo': item.position || '',
-                    'Sede': item.sede || '',
+                    'Empleado': item.employees?.full_name || 'Desconocido',
+                    'DNI': item.employees?.dni || '',
+                    'Cargo': item.employees?.position || '',
+                    'Sede': item.employees?.sede || '',
                     'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE') : '-',
                     'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE') : '-',
                     'Estado': getStatusText(item),
                     'Tipo': getTypeText(item),
                     'Validado': item.validated ? 'SÍ' : 'NO',
-                    'Motivo/Notas': item.notes || ''
+                    'Motivo/Notas': item.notes || item.absence_reason || ''
                 };
             })
 
@@ -357,23 +513,13 @@ export default function AttendanceList() {
             
             // Ajustar ancho de columnas
             const wscols = [
-                {wch: 12}, // Fecha
-                {wch: 30}, // Empleado
-                {wch: 12}, // DNI
-                {wch: 20}, // Cargo
-                {wch: 15}, // Sede
-                {wch: 12}, // Entrada
-                {wch: 12}, // Salida
-                {wch: 15}, // Estado (más ancho)
-                {wch: 15}, // Tipo
-                {wch: 8},  // Validado
-                {wch: 40}  // Notas
+                {wch: 12}, {wch: 30}, {wch: 12}, {wch: 20}, {wch: 15},
+                {wch: 12}, {wch: 12}, {wch: 15}, {wch: 15}, {wch: 8}, {wch: 40}
             ]
             ws['!cols'] = wscols
 
             XLSX.utils.book_append_sheet(wb, ws, 'Asistencias')
             
-            // Descargar archivo
             const fileName = `Reporte_Asistencias_${startDate}_al_${endDate}.xlsx`
             XLSX.writeFile(wb, fileName)
 
@@ -388,15 +534,10 @@ export default function AttendanceList() {
     async function handleValidate() {
         if (!validationModal) return
 
-        // Usar ID de empleado si existe
-        // Si no existe perfil de empleado, NO podemos usar user.id (Auth ID) directamente
-        // porque la función RPC espera un UUID válido de la tabla employees, no de auth.users.
-        // A MENOS que hayamos insertado el user.id en employees también.
-        
         const supervisorId = user?.employee_id;
 
         if (!supervisorId) {
-            alert('Error: No se encontró un perfil de empleado asociado a este usuario. No puedes validar asistencias.')
+            alert('Error: No se encontró un perfil de empleado asociado. No puedes validar asistencias.')
             return
         }
 
@@ -405,7 +546,7 @@ export default function AttendanceList() {
 
             const { data, error } = await supabase.rpc('supervisor_validate_attendance', {
                 p_attendance_id: validationModal.attendanceId,
-                p_supervisor_id: supervisorId, // Usamos el ID de empleado real
+                p_supervisor_id: supervisorId,
                 p_validated: validationModal.approved,
                 p_notes: validationNotes || null
             })
@@ -416,10 +557,8 @@ export default function AttendanceList() {
                 throw new Error(data.message || 'Error validando asistencia')
             }
 
-            // Recargar asistencias
-            await loadAttendances()
+            await loadAttendances(currentPage)
 
-            // Cerrar modal
             setValidationModal(null)
             setValidationNotes('')
 
@@ -431,7 +570,6 @@ export default function AttendanceList() {
             setValidating(false)
         }
     }
-
 
     function getStatusBadge(attendance) {
         const type = attendance.record_type;
@@ -503,9 +641,6 @@ export default function AttendanceList() {
 
     function formatDate(dateString) {
         if (!dateString) return '';
-        // Solución para problema de zona horaria:
-        // "2026-01-21" se interpreta como UTC 00:00, que en Perú es día 20 19:00.
-        // Forzamos la interpretación como fecha local sumando la hora T12:00:00 o parseando manualmente.
         const [year, month, day] = dateString.split('-');
         const date = new Date(year, month - 1, day);
         
@@ -533,6 +668,174 @@ export default function AttendanceList() {
         absent: globalStats.absent
     }
 
+    // ==========================================
+    // Lógica de Importación Masiva
+    // ==========================================
+    const handleFileChange = (e) => {
+        const file = e.target.files[0]
+        if (file) {
+            setImportFile(file)
+            readExcel(file)
+        }
+    }
+
+    const readExcel = (file) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            const data = new Uint8Array(e.target.result)
+            const workbook = XLSX.read(data, { type: 'array' })
+            const sheetName = workbook.SheetNames[0]
+            const sheet = workbook.Sheets[sheetName]
+            
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+            
+            if (jsonData.length < 2) {
+                alert('El archivo parece estar vacío o sin cabeceras.')
+                return
+            }
+
+            const rows = jsonData.slice(1).map((row, idx) => ({
+                id: idx,
+                dni: row[0],
+                date: processExcelDate(row[1]),
+                checkIn: processExcelTime(row[2]),
+                checkOut: null,
+                isValid: validateRow(row)
+            }))
+
+            setImportPreview(rows)
+        }
+        reader.readAsArrayBuffer(file)
+    }
+
+    const validateRow = (row) => {
+        return row[0] && row[1]
+    }
+
+    const processExcelDate = (excelDate) => {
+        if (typeof excelDate === 'number') {
+            const date = XLSX.SSF.parse_date_code(excelDate)
+            return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`
+        }
+        if (typeof excelDate === 'string') {
+            const dateStr = excelDate.trim()
+            
+            const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
+            if (dmyMatch) {
+                const day = dmyMatch[1].padStart(2, '0')
+                const month = dmyMatch[2].padStart(2, '0')
+                const year = dmyMatch[3]
+                return `${year}-${month}-${day}`
+            }
+            
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                return dateStr
+            }
+        }
+        return excelDate
+    }
+    
+    const processExcelTime = (excelTime) => {
+         if (!excelTime) return null
+         
+         if (typeof excelTime === 'number') {
+             const totalSeconds = Math.floor(excelTime * 86400)
+             const hours = Math.floor(totalSeconds / 3600)
+             const minutes = Math.floor((totalSeconds % 3600) / 60)
+             return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`
+         }
+         
+         if (typeof excelTime === 'string') {
+             const timeStr = excelTime.trim().toLowerCase()
+             
+             const match = timeStr.match(/^(\d{1,2})[:.](\d{2})\s*([ap])\.?\s*m\.?$/)
+             
+             if (match) {
+                 let hours = parseInt(match[1])
+                 const minutes = parseInt(match[2])
+                 const meridiem = match[3]
+                 
+                 if (meridiem === 'p' && hours < 12) hours += 12
+                 if (meridiem === 'a' && hours === 12) hours = 0
+                 
+                 return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`
+             }
+             
+             if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(timeStr)) {
+                 return timeStr
+             }
+         }
+
+         return excelTime
+    }
+
+    const handleImport = async () => {
+        if (importPreview.length === 0) return
+
+        setImportLoading(true)
+        try {
+            const payload = importPreview
+                .filter(row => row.isValid)
+                .map(row => ({
+                    dni: String(row.dni).trim(),
+                    work_date: processExcelDate(row.date),
+                    check_in: processExcelTime(row.checkIn),
+                    check_out: null, 
+                    record_type: 'ASISTENCIA',
+                    sede: user?.sede || null 
+                }))
+
+            const result = await bulkImportAttendance(payload)
+            
+            setImportResult({
+                success: true,
+                count: result.imported_count || payload.length,
+                message: 'Importación completada exitosamente'
+            })
+            
+            loadAttendances(1)
+        } catch (error) {
+            console.error('Error importando:', error)
+            setImportResult({
+                success: false,
+                message: error.message || 'Error al procesar el archivo'
+            })
+        } finally {
+            setImportLoading(false)
+        }
+    }
+
+    const closeImportModal = () => {
+        setIsImportModalOpen(false)
+        setImportFile(null)
+        setImportPreview([])
+        setImportResult(null)
+    }
+
+    const handleDownloadTemplate = () => {
+        const headers = [['DNI', 'FECHA (YYYY-MM-DD)', 'HORA INGRESO (HH:MM)']]
+        const ws = XLSX.utils.aoa_to_sheet(headers)
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, "Plantilla_Asistencias")
+        XLSX.writeFile(wb, "plantilla_asistencias.xlsx")
+    }
+
+    // Función para limpiar filtros
+    const handleClearFilters = () => {
+        const today = getLocalDate()
+        setFilters({
+            status: 'all',
+            dateFrom: today,
+            dateTo: '',
+            search: ''
+        })
+    }
+
+    // Determinar si hay filtros activos
+    const hasActiveFilters = filters.search !== '' || 
+                            filters.status !== 'all' || 
+                            filters.dateTo !== ''
+
     return (
         <div className="w-full">
             <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -543,27 +846,36 @@ export default function AttendanceList() {
                     </p>
                 </div>
                 <div className="flex flex-col sm:flex-row md:flex-col items-start sm:items-center md:items-end gap-2 w-full md:w-auto">
-                    <button
-                        onClick={exportToExcel}
-                        disabled={exporting || loading}
-                        className={`flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg shadow-sm hover:bg-green-700 transition-colors w-full sm:w-auto ${
-                            (exporting || loading) ? 'opacity-50 cursor-not-allowed' : ''
-                        }`}
-                    >
-                        {exporting ? (
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        ) : (
-                            <Download className="h-4 w-4" />
-                        )}
-                        {exporting ? 'Exportando...' : 'Exportar Excel'}
-                    </button>
+                    <div className="flex gap-2 w-full">
+                        <button
+                            onClick={() => setIsImportModalOpen(true)}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors flex-1 sm:flex-initial"
+                        >
+                            <Upload className="h-4 w-4" />
+                            Importar
+                        </button>
+                        <button
+                            onClick={exportToExcel}
+                            disabled={exporting || loading}
+                            className={`flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg shadow-sm hover:bg-green-700 transition-colors flex-1 sm:flex-initial ${
+                                (exporting || loading) ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                        >
+                            {exporting ? (
+                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                            ) : (
+                                <Download className="h-4 w-4" />
+                            )}
+                            {exporting ? '...' : 'Exportar'}
+                        </button>
+                    </div>
                     {!hasValidationPermission && (
                         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-w-sm flex items-start gap-3">
                             <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
                             <div>
                                 <p className="text-sm font-bold text-yellow-800">Modo Lectura</p>
                                 <p className="text-xs text-yellow-700 mt-1">
-                                    Solo 'Analista de Gente y Gestión' y 'Jefe de Área' pueden validar.
+                                    Solo RRHH puede validar asistencias.
                                 </p>
                             </div>
                         </div>
@@ -613,7 +925,7 @@ export default function AttendanceList() {
 
             {/* Filtros */}
             <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             <Search className="inline h-4 w-4 mr-1" />
@@ -664,6 +976,19 @@ export default function AttendanceList() {
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                     </div>
+                    
+                    {/* Botón Limpiar Filtros */}
+                    {hasActiveFilters && (
+                        <div className="flex items-end">
+                            <button
+                                onClick={handleClearFilters}
+                                className="w-full px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors flex items-center justify-center gap-2"
+                            >
+                                <X size={16} />
+                                Limpiar
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -676,7 +1001,7 @@ export default function AttendanceList() {
                 <div className="bg-white rounded-lg shadow p-8 text-center">
                     <Calendar className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                     <h3 className="text-xl font-semibold text-gray-900 mb-2">No se encontraron asistencias</h3>
-                    <p className="text-gray-600">Intenta ajustar los filtros de búsqueda</p>
+                    <p className="text-gray-600">Intenta ajustar los filtros de búsqueda o el rango de fechas</p>
                 </div>
             ) : (
                 <div className="bg-white rounded-lg shadow-md overflow-hidden">
@@ -806,7 +1131,7 @@ export default function AttendanceList() {
                                                         }
                                                     }
                                                 } catch (e) {
-                                                    console.error('Error parsing location:', e, attendance.location_in);
+                                                    console.error('Error parsing location:', e);
                                                 }
                                                 return <span className="text-sm text-gray-400">Sin ubicación</span>;
                                             })()}
@@ -854,7 +1179,6 @@ export default function AttendanceList() {
                                     <span className="sr-only">Anterior</span>
                                     <ChevronLeft className="h-5 w-5" aria-hidden="true" />
                                 </button>
-                                {/* Números de página simplificados */}
                                 <span className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 focus:outline-offset-0">
                                     Página {currentPage} de {totalPages}
                                 </span>
@@ -1034,6 +1358,137 @@ export default function AttendanceList() {
                     </div>
                 </div>
             )}
+
+            {/* Modal Importación */}
+            <Modal
+                isOpen={isImportModalOpen}
+                onClose={closeImportModal}
+                title="Importar Asistencias Masivas"
+                showCancel={true}
+                cancelText="Cerrar"
+                onConfirm={importResult?.success ? closeImportModal : (importPreview.length > 0 && !importResult ? handleImport : null)}
+                confirmText={importResult?.success ? "Finalizar" : (importLoading ? "Importando..." : "Importar Datos")}
+                type="info"
+            >
+                <div className="space-y-6">
+                    {!importResult ? (
+                        <>
+                            <div className="flex justify-between items-center">
+                                <p className="text-sm text-slate-500">
+                                    Carga un archivo Excel con las asistencias.
+                                </p>
+                                <button 
+                                    onClick={handleDownloadTemplate}
+                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
+                                >
+                                    Descargar Plantilla
+                                </button>
+                            </div>
+
+                            {/* Zona de Carga */}
+                            <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+                                importFile ? 'border-blue-200 bg-blue-50/30' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'
+                            }`}>
+                                {!importFile ? (
+                                    <div 
+                                        onClick={() => fileInputRef.current.click()}
+                                        className="cursor-pointer flex flex-col items-center gap-3"
+                                    >
+                                        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                                            <Upload size={24} />
+                                        </div>
+                                        <h3 className="text-sm font-semibold text-slate-700">Clic para subir Excel</h3>
+                                        <p className="text-xs text-slate-400">
+                                            Soporta .xlsx, .xls
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2">
+                                        <FileSpreadsheet size={32} className="text-green-600" />
+                                        <h3 className="text-sm font-bold text-slate-800">{importFile.name}</h3>
+                                        <button 
+                                            onClick={() => {
+                                                setImportFile(null)
+                                                setImportPreview([])
+                                            }}
+                                            className="text-xs text-red-500 hover:text-red-700 font-medium mt-1"
+                                        >
+                                            Cambiar archivo
+                                        </button>
+                                    </div>
+                                )}
+                                <input 
+                                    type="file" 
+                                    ref={fileInputRef} 
+                                    className="hidden" 
+                                    accept=".xlsx, .xls" 
+                                    onChange={handleFileChange} 
+                                />
+                            </div>
+
+                            {/* Vista Previa */}
+                            {importPreview.length > 0 && (
+                                <div className="space-y-2">
+                                    <h4 className="text-sm font-bold text-slate-700">Vista Previa ({importPreview.length} registros)</h4>
+                                    <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-lg">
+                                        <table className="w-full text-xs text-left">
+                                            <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                                                <tr>
+                                                    <th className="px-3 py-2">DNI</th>
+                                                    <th className="px-3 py-2">Fecha</th>
+                                                    <th className="px-3 py-2">Entrada</th>
+                                                    <th className="px-3 py-2">Estado</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {importPreview.slice(0, 100).map((row, i) => (
+                                                    <tr key={i} className={row.isValid ? '' : 'bg-red-50'}>
+                                                        <td className="px-3 py-2 font-mono">{row.dni}</td>
+                                                        <td className="px-3 py-2">{row.date}</td>
+                                                        <td className="px-3 py-2">{row.checkIn || '-'}</td>
+                                                        <td className="px-3 py-2">
+                                                            {row.isValid 
+                                                                ? <CheckCircle size={14} className="text-green-500" /> 
+                                                                : <XCircle size={14} className="text-red-500" />
+                                                            }
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {importPreview.length > 100 && (
+                                                    <tr>
+                                                        <td colSpan="5" className="px-3 py-2 text-center text-slate-400 italic">
+                                                            ... y {importPreview.length - 100} más ...
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className={`p-6 rounded-lg text-center ${importResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                            {importResult.success ? (
+                                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                            ) : (
+                                <XCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+                            )}
+                            <h3 className={`text-lg font-bold mb-1 ${importResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                                {importResult.success ? '¡Importación Exitosa!' : 'Error en la Importación'}
+                            </h3>
+                            <p className={`text-sm ${importResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                                {importResult.message}
+                            </p>
+                            {importResult.success && (
+                                <p className="text-xs text-green-700 mt-2">
+                                    Se procesaron {importResult.count} registros correctamente.
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </Modal>
         </div>
     )
 }
