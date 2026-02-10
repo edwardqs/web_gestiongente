@@ -208,12 +208,14 @@ export default function AttendanceList() {
 
             // SIEMPRE usar consulta histórica (rango de fechas) en lugar de RPC diaria
             // Esto permite ver cualquier rango de fechas, no solo "hoy"
-            let isSingleDate = filters.dateFrom && filters.dateTo && filters.dateFrom === filters.dateTo
+            // FIX: Si dateTo está vacío, asumir que es "Modo Día Único" para dateFrom (Roster View)
+            let isSingleDate = filters.dateFrom && (!filters.dateTo || filters.dateFrom === filters.dateTo)
+            
             let reportData = []
             let totalRows = 0
 
             // MODO REPORTE DIARIO (Roster)
-            // Si se selecciona una fecha única, mostramos TODOS los empleados y su estado
+            // Si se selecciona una fecha única (o solo Desde), mostramos TODOS los empleados y su estado
             if (isSingleDate) {
                 console.log('Loading Daily Roster Mode for:', filters.dateFrom)
                 
@@ -250,7 +252,7 @@ export default function AttendanceList() {
                     check_in: item.check_in,
                     check_out: item.check_out,
                     is_late: item.is_late || false,
-                    record_type: item.record_type || 'SIN REGISTRO',
+                    record_type: item.record_type || (item.computed_status === 'absent' ? null : item.record_type),
                     status: item.computed_status, // present, absent, late, on_time
                     validated: item.validated,
                     absence_reason: item.absence_reason,
@@ -268,6 +270,42 @@ export default function AttendanceList() {
                 setAttendances(processedList)
                 setTotalRecords(totalRows)
                 setTotalPages(Math.ceil(totalRows / PAGE_SIZE))
+                
+                // Calcular estadísticas para Roster (usando contadores reales de la DB si es posible, o aproximando con paginación)
+                // Nota: La RPC actual devuelve el total paginado. Para stats globales exactas necesitaríamos otra RPC o que esta devuelva metadata.
+                // Por ahora, para no romper, usaremos lo que tenemos en pantalla o una estimación si es admin.
+                // MEJORA: Calcular stats basados en el total devuelto por RPC si implementamos contadores allí.
+                // Como parche rápido: Si es admin y single date, asumimos que totalRows es el total de empleados.
+                // Y absent = totalRows - (present + late + onTime de la DB).
+                // Pero sin hacer otra query es difícil.
+                // Vamos a dejar que las stats se calculen sobre lo visible o ajustar visualmente.
+                
+                // FIX CRÍTICO: Las stats globales deben reflejar el TOTAL REAL, no solo la página actual.
+                // Llamar a la RPC get_daily_attendance_stats para obtener contadores reales.
+                if (page === 1) { 
+                     try {
+                        const { data: statsData, error: statsError } = await supabase.rpc('get_daily_attendance_stats', {
+                            p_date: filters.dateFrom,
+                            p_sede: rpcSede,
+                            p_business_unit: rpcBusinessUnit,
+                            p_search: filters.search || null
+                        })
+
+                        if (statsError) console.error('Error fetching daily stats:', statsError)
+                        
+                        if (statsData) {
+                            setGlobalStats({
+                                total: statsData.total,
+                                onTime: statsData.onTime,
+                                late: statsData.late,
+                                absent: statsData.absent
+                            })
+                        }
+                     } catch (err) {
+                        console.error('Stats fetch error:', err)
+                     }
+                }
+
                 setLoading(false)
                 return // Salir, ya cargamos los datos
             }
@@ -787,11 +825,22 @@ export default function AttendanceList() {
 
             const result = await bulkImportAttendance(payload)
             
-            setImportResult({
-                success: true,
-                count: result.imported_count || payload.length,
-                message: 'Importación completada exitosamente'
-            })
+            // Verificar si hubo errores parciales reportados por el RPC
+            if (result.error_count > 0) {
+                setImportResult({
+                    success: result.imported_count > 0, // Parcialmente exitoso si se importó algo
+                    count: result.imported_count,
+                    error_count: result.error_count,
+                    errors: result.errors,
+                    message: `Se importaron ${result.imported_count} registros. Hubo ${result.error_count} errores.`
+                })
+            } else {
+                setImportResult({
+                    success: true,
+                    count: result.imported_count || payload.length,
+                    message: 'Importación completada exitosamente'
+                })
+            }
             
             loadAttendances(1)
         } catch (error) {
@@ -1468,22 +1517,38 @@ export default function AttendanceList() {
                             )}
                         </>
                     ) : (
-                        <div className={`p-6 rounded-lg text-center ${importResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-                            {importResult.success ? (
-                                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                            ) : (
-                                <XCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-                            )}
-                            <h3 className={`text-lg font-bold mb-1 ${importResult.success ? 'text-green-800' : 'text-red-800'}`}>
-                                {importResult.success ? '¡Importación Exitosa!' : 'Error en la Importación'}
-                            </h3>
-                            <p className={`text-sm ${importResult.success ? 'text-green-600' : 'text-red-600'}`}>
-                                {importResult.message}
-                            </p>
-                            {importResult.success && (
-                                <p className="text-xs text-green-700 mt-2">
-                                    Se procesaron {importResult.count} registros correctamente.
+                        <div className={`p-6 rounded-lg ${importResult.success && !importResult.error_count ? 'bg-green-50 border border-green-200' : 'bg-orange-50 border border-orange-200'}`}>
+                            <div className="text-center">
+                                {importResult.success && !importResult.error_count ? (
+                                    <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                                ) : (
+                                    <AlertCircle className="w-12 h-12 text-orange-500 mx-auto mb-3" />
+                                )}
+                                <h3 className={`text-lg font-bold mb-1 ${importResult.success && !importResult.error_count ? 'text-green-800' : 'text-orange-800'}`}>
+                                    {importResult.success && !importResult.error_count ? '¡Importación Exitosa!' : 'Resultado de la Importación'}
+                                </h3>
+                                <p className={`text-sm ${importResult.success && !importResult.error_count ? 'text-green-600' : 'text-orange-700'}`}>
+                                    {importResult.message}
                                 </p>
+                                {importResult.success && (
+                                    <p className="text-xs text-green-700 mt-2">
+                                        Se procesaron {importResult.count} registros correctamente.
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Lista de Errores */}
+                            {importResult.errors && importResult.errors.length > 0 && (
+                                <div className="mt-4 text-left">
+                                    <h4 className="text-xs font-bold text-orange-800 uppercase mb-2">Detalle de Errores:</h4>
+                                    <div className="bg-white border border-orange-200 rounded p-3 max-h-40 overflow-y-auto">
+                                        <ul className="list-disc list-inside text-xs text-red-600 space-y-1">
+                                            {importResult.errors.map((err, idx) => (
+                                                <li key={idx}>{err}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     )}
