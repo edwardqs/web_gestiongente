@@ -814,14 +814,39 @@ export default function AttendanceList() {
         try {
             const payload = importPreview
                 .filter(row => row.isValid)
-                .map(row => ({
-                    dni: String(row.dni).trim(),
-                    work_date: processExcelDate(row.date),
-                    check_in: processExcelTime(row.checkIn),
-                    check_out: null, 
-                    record_type: 'ASISTENCIA',
-                    sede: user?.sede || null 
-                }))
+                .map(row => {
+                    const dateStr = processExcelDate(row.date)
+                    const timeStr = processExcelTime(row.checkIn)
+                    
+                    let checkInTime = null
+                    if (dateStr && timeStr) {
+                        // Construir fecha asumiendo zona horaria Perú (UTC-5)
+                        try {
+                            const peruDate = new Date(`${dateStr}T${timeStr}-05:00`)
+                            
+                            // Verificar si la fecha es válida
+                            if (!isNaN(peruDate.getTime())) {
+                                // Extraemos SOLO la hora en formato UTC (HH:mm:ss)
+                                // Ejemplo: 08:45 Perú -> 13:45 UTC
+                                // La base de datos concatenará: "2026-02-10" + " " + "13:45:00"
+                                // Al guardarse como timestamp, se interpretará como 13:45 UTC
+                                checkInTime = peruDate.toISOString().split('T')[1].split('.')[0]
+                            }
+                        } catch (e) {
+                            console.error('Error procesando fecha:', e)
+                            checkInTime = timeStr // Fallback a la hora original si falla
+                        }
+                    }
+
+                    return {
+                        dni: String(row.dni).trim(),
+                        work_date: dateStr,
+                        check_in: checkInTime, // Enviamos solo la hora HH:mm:ss (en UTC)
+                        check_out: null, 
+                        record_type: 'ASISTENCIA',
+                        sede: user?.sede || null 
+                    }
+                })
 
             const result = await bulkImportAttendance(payload)
             
@@ -1053,7 +1078,7 @@ export default function AttendanceList() {
                     <p className="text-gray-600">Intenta ajustar los filtros de búsqueda o el rango de fechas</p>
                 </div>
             ) : (
-                <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                <div className="bg-white rounded-t-lg shadow-md overflow-hidden border-b border-gray-200">
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
@@ -1195,7 +1220,7 @@ export default function AttendanceList() {
 
             {/* Paginación */}
             {!loading && attendances.length > 0 && (
-                <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6 rounded-b-lg shadow-md mt-[-24px] mb-6">
+                <div className="flex items-center justify-between bg-white px-4 py-3 sm:px-6 rounded-b-lg shadow-md mb-6">
                     <div className="flex flex-1 justify-between sm:hidden">
                         <button
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}

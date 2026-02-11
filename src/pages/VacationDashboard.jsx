@@ -421,20 +421,20 @@ export default function VacationDashboard() {
             </div>
 
             {/* Tabla */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[600px]">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-slate-600">
                         <thead className="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
                             <tr>
-                                <th className="px-6 py-4 font-bold">Empleado</th>
-                                <th className="px-6 py-4 font-bold">Sede / Cargo</th>
-                                <th className="px-6 py-4 font-bold">Unidad de Negocio</th>
-                                <th className="px-6 py-4 font-bold text-center">Ingreso</th>
-                                <th className="px-6 py-4 font-bold text-center">Ganados</th>
-                                <th className="px-6 py-4 font-bold text-center">Consumidos</th>
-                                <th className="px-6 py-4 font-bold text-center">Saldo</th>
-                                <th className="px-6 py-4 font-bold text-center">Estado</th>
-                                <th className="px-6 py-4 text-right">Acción</th>
+                                <th className="px-6 py-4 font-bold w-[20%]">Empleado</th>
+                                <th className="px-6 py-4 font-bold w-[15%]">Sede / Cargo</th>
+                                <th className="px-6 py-4 font-bold w-[10%]">Unidad de Negocio</th>
+                                <th className="px-6 py-4 font-bold text-center w-[10%]">Ingreso</th>
+                                <th className="px-6 py-4 font-bold text-center w-[8%]">Ganados</th>
+                                <th className="px-6 py-4 font-bold text-center w-[8%]">Consumidos</th>
+                                <th className="px-6 py-4 font-bold text-center w-[8%]">Saldo</th>
+                                <th className="px-6 py-4 font-bold text-center w-[12%]">Estado</th>
+                                <th className="px-6 py-4 text-right w-[9%]">Acción</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
