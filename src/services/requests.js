@@ -1,5 +1,28 @@
 import { supabase } from '../lib/supabase'
 
+export const getSigningAuthority = async (employeeId) => {
+  try {
+    const { data, error } = await supabase.rpc('get_signing_authority', {
+      p_employee_id: employeeId
+    })
+
+    if (error) throw error
+    return { data, error: null }
+  } catch (error) {
+    console.error('Error fetching signing authority:', error)
+    // Retornar fallback en caso de error de RPC
+    return { 
+      data: {
+        full_name: "GIANCARLO URBINA GAITAN",
+        dni: "18161904",
+        position: "REPRESENTANTE LEGAL",
+        rule: "FALLBACK_ERROR"
+      }, 
+      error 
+    }
+  }
+}
+
 export const getPapeletaById = async (id) => {
   try {
     const { data, error } = await supabase

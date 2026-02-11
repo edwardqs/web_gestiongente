@@ -12,6 +12,7 @@ import CalendarRequests from './pages/CalendarRequests'
 import RolesManagement from './pages/RolesManagement'
 import PositionsManagement from './pages/PositionsManagement'
 import AreasManagement from './pages/AreasManagement'
+import MobileAccessConfig from './pages/MobileAccessConfig'
 import VacationDashboard from './pages/VacationDashboard'
 import VacationExcelUpload from './pages/VacationExcelUpload'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
@@ -116,6 +117,13 @@ function App() {
               <Route path="/areas" element={
                 <ProtectedRoute module="config">
                   <AreasManagement />
+                </ProtectedRoute>
+              } />
+
+              {/* Configuración de Acceso Móvil */}
+              <Route path="/mobile-access-config" element={
+                <ProtectedRoute module="settings">
+                  <MobileAccessConfig />
                 </ProtectedRoute>
               } />
 

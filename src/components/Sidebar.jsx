@@ -18,7 +18,8 @@ import {
   Shield,
   Plane,
   Clock,
-  LayoutGrid
+  LayoutGrid,
+  Smartphone
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
@@ -185,7 +186,8 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       submenu: [
         { id: 'set-roles', label: 'Usuarios y Permisos', icon: Shield, href: '/roles' },
         { id: 'set-positions', label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' },
-        { id: 'set-areas', label: 'Gestión de Áreas', icon: LayoutGrid, href: '/areas' }
+        { id: 'set-areas', label: 'Gestión de Áreas', icon: LayoutGrid, href: '/areas' },
+        { id: 'set-mobile-access', label: 'Acceso App Móvil', icon: Smartphone, href: '/mobile-access-config' }
       ]
     },
   ]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { getPapeletaById } from '../services/requests'
+import { getPapeletaById, getSigningAuthority } from '../services/requests'
 import { Printer, Mail, Send } from 'lucide-react'
 import pauserLogo from '../assets/pauser_logo.png'
 import * as html2pdfPkg from 'html2pdf.js'
@@ -23,6 +23,7 @@ import { PapeletaTemplate } from './PapeletaTemplate'
 const PapeletaFinal = () => {
   const { id } = useParams()
   const [papeleta, setPapeleta] = useState(null)
+  const [signer, setSigner] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [sending, setSending] = useState(false)
@@ -31,8 +32,8 @@ const PapeletaFinal = () => {
     nombre: "PAUSER DISTRIBUCIONES S.A.C.",
     ruc: "20600869940",
     domicilio: "JR. PEDRO MUÑIZ NRO. 253 DPTO. 1601 SEC. JORGE CHAVEZ LA LIBERTAD - TRUJILLO",
-    representante: "GIANCARLO URBINA GAITAN",
-    dni_representante: "18161904"
+    representante: signer?.full_name || "GIANCARLO URBINA GAITAN",
+    dni_representante: signer?.dni || "18161904"
   }
 
   useEffect(() => {
@@ -43,6 +44,12 @@ const PapeletaFinal = () => {
         const { data, error } = await getPapeletaById(id)
         if (error) throw new Error(error.message)
         setPapeleta(data)
+
+        // Obtener responsable de firma dinámicamente
+        if (data?.employee_id) {
+            const { data: signerData } = await getSigningAuthority(data.employee_id)
+            if (signerData) setSigner(signerData)
+        }
       } catch (err) {
         setError(err.message)
       } finally {
