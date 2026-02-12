@@ -105,6 +105,13 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: '/attendance-list', 
       module: 'attendance' 
     },
+    {
+      id: 'reports',
+      icon: FileText,
+      label: 'Reportes',
+      href: '/reports',
+      module: 'dashboard'
+    },
     { 
       id: 'requests',
       icon: FileText, 

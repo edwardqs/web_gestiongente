@@ -15,6 +15,7 @@ import AreasManagement from './pages/AreasManagement'
 import MobileAccessConfig from './pages/MobileAccessConfig'
 import VacationDashboard from './pages/VacationDashboard'
 import VacationExcelUpload from './pages/VacationExcelUpload'
+import ReportsCenter from './pages/ReportsCenter'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
 
@@ -144,6 +145,13 @@ function App() {
               <Route path="/vacaciones/carga-masiva" element={
                 <ProtectedRoute module="vacations" requiredAction="write">
                   <VacationExcelUpload />
+                </ProtectedRoute>
+              } />
+
+              {/* Centro de Reportes - Accesible para roles con permisos de lectura o Admin */}
+              <Route path="/reports" element={
+                <ProtectedRoute module="dashboard">
+                  <ReportsCenter />
                 </ProtectedRoute>
               } />
             </Route>
