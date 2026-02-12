@@ -89,6 +89,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       module: 'dashboard' 
     },
     // Solo agregar si debe mostrarse
+    /* COMENTADO POR SOLICITUD DE USUARIO (EMPLEADOS)
     ...(showEmployeesMenu ? [{ 
       id: 'employees',
       icon: Users, 
@@ -96,6 +97,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: employeesHref, 
       module: 'employees' 
     }] : []),
+    */
     { 
       id: 'attendance',
       icon: Clock, 
@@ -170,6 +172,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         { id: 'dept-lima', label: 'Lima', icon: MapPin, href: '/employees/lima' },
       ]
     },
+    /* COMENTADO POR SOLICITUD DE USUARIO (DOCUMENTOS)
     { 
       id: 'documents',
       icon: FileText, 
@@ -177,6 +180,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: '#', 
       module: 'documents' 
     },
+    */
     { 
       id: 'settings',
       icon: Settings, 

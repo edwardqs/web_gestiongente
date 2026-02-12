@@ -58,25 +58,25 @@ function App() {
                 </ProtectedRoute>
               } />
 
+              {/* Rutas de Empleados - COMENTADO POR SOLICITUD DE USUARIO
               <Route path="/register-employee" element={
                 <ProtectedRoute module="employees" requiredAction="write">
                   <RegisterEmployee />
                 </ProtectedRoute>
               } />
 
-              {/* Ruta para editar empleado */}
               <Route path="/edit-employee/:id" element={
                 <ProtectedRoute module="employees" requiredAction="write">
                   <RegisterEmployee />
                 </ProtectedRoute>
               } />
 
-              {/* Ruta dinámica para listar empleados por sede */}
               <Route path="/employees/:sede" element={
                 <ProtectedRoute module="employees">
                   <EmployeesList />
                 </ProtectedRoute>
               } />
+              */}
 
               {/* Ruta para ver lista de asistencias */}
               <Route path="/attendance-list" element={
