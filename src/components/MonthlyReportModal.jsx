@@ -85,9 +85,9 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
                             className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
                         >
                             <option value="all">Todas las Sedes</option>
+                            <option value="ADM. CENTRAL">ADM. CENTRAL</option>
                             <option value="LIMA">Lima</option>
                             <option value="TRUJILLO">Trujillo</option>
-                            <option value="AREQUIPA">Arequipa</option>
                             <option value="CHIMBOTE">Chimbote</option>
                             <option value="HUARAZ">Huaraz</option>
                         </select>

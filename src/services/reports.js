@@ -65,13 +65,13 @@ export const getEmployeesReport = async (sede = null, businessUnit = null) => {
  */
 export const getAttendanceReport = async (startDate, endDate, sede = null) => {
     try {
-        // Usamos la función RPC existente si es posible, o consulta directa
-        // Consulta directa para mayor flexibilidad en el reporte
+        // Consulta directa con relación explícita para evitar ambigüedad (PGRST201)
+        // Usamos la relación 'attendance_employee_id_fkey'
         let query = supabase
             .from('attendance')
             .select(`
                 *,
-                employees!inner(
+                employees!attendance_employee_id_fkey!inner(
                     full_name,
                     dni,
                     position,
@@ -85,6 +85,7 @@ export const getAttendanceReport = async (startDate, endDate, sede = null) => {
             .order('check_in', { ascending: true })
 
         if (sede && sede !== 'all') {
+            // Nota: Al usar relación explícita, el filtro también debe usarla o usar la sintaxis embebida
             query = query.eq('employees.sede', sede)
         }
 

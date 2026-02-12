@@ -49,6 +49,9 @@ export default function ReportsCenter() {
             let data = []
             let fileName = ''
             let sheetName = ''
+            
+            // Determinar sufijo de sede para el nombre del archivo
+            const sedeSuffix = (selectedSede === 'all' || !selectedSede) ? 'GENERAL' : selectedSede.toUpperCase().replace(/\s+/g, '_')
 
             switch (type) {
                 case 'employees':
@@ -83,16 +86,21 @@ export default function ReportsCenter() {
                         'CCI': emp.cci_account,
                         'Estado': emp.is_active ? 'ACTIVO' : 'INACTIVO'
                     }))
-                    fileName = `Maestro_Empleados_${new Date().toISOString().split('T')[0]}.xlsx`
+                    fileName = `Maestro_Empleados_${sedeSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`
                     sheetName = 'Empleados'
                     break
 
                 case 'attendance':
-                    const { data: attData } = await getAttendanceReport(
+                    const { data: attData, error: attError } = await getAttendanceReport(
                         dateRange.start,
                         dateRange.end,
                         selectedSede === 'all' ? null : selectedSede
                     )
+
+                    if (attError || !attData) {
+                        throw new Error('No se pudieron cargar los datos de asistencia')
+                    }
+
                     data = attData.map(att => ({
                         'Fecha': att.work_date,
                         'DNI': att.employees?.dni,
@@ -104,7 +112,7 @@ export default function ReportsCenter() {
                         'Tipo': att.record_type,
                         'Validado': att.is_validated ? 'SÍ' : 'NO'
                     }))
-                    fileName = `Asistencias_${dateRange.start}_al_${dateRange.end}.xlsx`
+                    fileName = `Asistencias_${sedeSuffix}_${dateRange.start}_al_${dateRange.end}.xlsx`
                     sheetName = 'Asistencias'
                     break
 
@@ -122,7 +130,7 @@ export default function ReportsCenter() {
                         'Unidad Negocio': h.business_unit || '-',
                         'Fecha Ingreso': h.entry_date
                     }))
-                    fileName = `Nuevos_Ingresos_${selectedMonth.month}_${selectedMonth.year}.xlsx`
+                    fileName = `Nuevos_Ingresos_${sedeSuffix}_${selectedMonth.month}_${selectedMonth.year}.xlsx`
                     sheetName = 'Ingresos'
                     break
 
@@ -142,7 +150,7 @@ export default function ReportsCenter() {
                         'Saldo Actual': v.balance,
                         'Estado': v.status
                     }))
-                    fileName = `Saldos_Vacaciones_${new Date().toISOString().split('T')[0]}.xlsx`
+                    fileName = `Saldos_Vacaciones_${sedeSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`
                     sheetName = 'Vacaciones'
                     break
             }
@@ -198,6 +206,7 @@ export default function ReportsCenter() {
                         className="border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
                     >
                         <option value="all">Todas las Sedes</option>
+                        <option value="ADM. CENTRAL">ADM. CENTRAL</option>
                         <option value="LIMA">Lima</option>
                         <option value="TRUJILLO">Trujillo</option>
                         <option value="CHIMBOTE">Chimbote</option>
@@ -206,7 +215,6 @@ export default function ReportsCenter() {
                         <option value="CHINCHA">Chincha</option>
                         <option value="ICA">Ica</option>
                         <option value="DESAGUADERO">Desaguadero</option>
-                        <option value="AREQUIPA">Arequipa</option>
                     </select>
                 </div>
             )}
