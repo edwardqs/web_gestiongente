@@ -473,16 +473,16 @@ export default function VacationDashboard() {
                                             <div className="text-xs text-slate-400">({emp.years_service} años)</div>
                                         </td>
                                         <td className="px-6 py-4 text-center font-bold text-blue-600 bg-blue-50/50 rounded-lg">
-                                            {emp.earned_days}
+                                            {Math.trunc(emp.earned_days || 0)}
                                         </td>
                                         <td className="px-6 py-4 text-center text-slate-600">
-                                            {parseFloat(emp.legacy_taken) + parseFloat(emp.app_taken)}
+                                            {Math.trunc(parseFloat(emp.legacy_taken || 0) + parseFloat(emp.app_taken || 0))}
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-3 py-1 rounded-lg font-bold ${
                                                 emp.balance >= 0 ? 'bg-slate-100 text-slate-800' : 'bg-red-100 text-red-700'
                                             }`}>
-                                                {emp.balance.toFixed(2)}
+                                                {Math.trunc(emp.balance || 0)}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-center">
@@ -539,7 +539,7 @@ export default function VacationDashboard() {
                                 <span className={`text-2xl font-bold ${
                                     selectedEmployee.balance >= 0 ? 'text-blue-600' : 'text-red-600'
                                 }`}>
-                                    {selectedEmployee.balance.toFixed(2)}
+                                    {Math.trunc(selectedEmployee.balance || 0)}
                                 </span>
                             </div>
                         </div>
@@ -549,7 +549,7 @@ export default function VacationDashboard() {
                                 <div className="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm">
                                     <Calculator size={16} /> Días Ganados
                                 </div>
-                                <div className="text-2xl font-bold text-blue-800">{selectedEmployee.earned_days}</div>
+                                <div className="text-2xl font-bold text-blue-800">{Math.trunc(selectedEmployee.earned_days || 0)}</div>
                                 <p className="text-xs text-blue-600 mt-1">
                                     (Antigüedad / 360) * 30
                                 </p>
@@ -584,7 +584,7 @@ export default function VacationDashboard() {
                                 SALDO = (GANADOS) - (HISTÓRICO + APP)
                             </p>
                             <p className="font-mono bg-white p-2 rounded border border-slate-200 text-xs mt-2">
-                                {selectedEmployee.balance.toFixed(2)} = ({selectedEmployee.earned_days}) - ({selectedEmployee.legacy_taken} + {selectedEmployee.app_taken})
+                                {Math.trunc(selectedEmployee.balance || 0)} = ({Math.trunc(selectedEmployee.earned_days || 0)}) - ({Math.trunc(selectedEmployee.legacy_taken || 0)} + {Math.trunc(selectedEmployee.app_taken || 0)})
                             </p>
                         </div>
                     </div>

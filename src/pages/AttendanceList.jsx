@@ -764,16 +764,30 @@ export default function AttendanceList() {
                     return t || '-';
                 };
 
+                const getLabel = (i) => {
+                    const t = i.record_type;
+                    const status = getStatusText(i);
+                    // Si el estado es AUSENCIA o el tipo es alguna variante de ausencia -> AUSENTISMO
+                    if (status === 'AUSENCIA' || 
+                        ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(t) ||
+                        i.status === 'absent') {
+                        return 'AUSENTISMO';
+                    }
+                    // Cualquier otro caso (ASISTENCIA, TARDANZA, DESCANSO MEDICO, LICENCIA, VACACIONES) -> ASISTENCIA
+                    return 'ASISTENCIA';
+                };
+
                 return {
                     'Fecha': item.work_date,
                     'Empleado': item.employees?.full_name || 'Desconocido',
                     'DNI': item.employees?.dni || '',
                     'Cargo': item.employees?.position || '',
                     'Sede': item.employees?.sede || '',
-                    'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE') : '-',
-                    'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE') : '-',
+                    'Hora Entrada': item.check_in ? new Date(item.check_in).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: true }) : '-',
+                    'Hora Salida': item.check_out ? new Date(item.check_out).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: true }) : '-',
                     'Estado': getStatusText(item),
                     'Tipo': getTypeText(item),
+                    'AUSENTISMO': getLabel(item),
                     'Validado': item.validated ? 'SÍ' : 'NO',
                     'Motivo/Notas': item.notes || item.absence_reason || ''
                 };

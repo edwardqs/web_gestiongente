@@ -91,6 +91,7 @@ export default function ReportsCenter() {
                     break
 
                 case 'attendance':
+                    // 1. Obtener datos de asistencia existentes
                     const { data: attData, error: attError } = await getAttendanceReport(
                         dateRange.start,
                         dateRange.end,
@@ -101,17 +102,120 @@ export default function ReportsCenter() {
                         throw new Error('No se pudieron cargar los datos de asistencia')
                     }
 
-                    data = attData.map(att => ({
-                        'Fecha': att.work_date,
-                        'DNI': att.employees?.dni,
-                        'Empleado': att.employees?.full_name,
-                        'Sede': att.employees?.sede,
-                        'Ingreso': att.check_in,
-                        'Salida': att.check_out,
-                        'Estado': att.status,
-                        'Tipo': att.record_type,
-                        'Validado': att.is_validated ? 'SÍ' : 'NO'
-                    }))
+                    // 2. Obtener lista de empleados para el cruce (Roster)
+                    const { data: allEmployees, error: empError2 } = await getEmployeesReport(
+                        selectedSede === 'all' ? null : selectedSede, 
+                        selectedBusinessUnit === 'all' ? null : selectedBusinessUnit
+                    )
+
+                    if (empError2 || !allEmployees) {
+                        throw new Error('No se pudo cargar la lista de empleados para el reporte')
+                    }
+
+                    // 3. Generar rango de fechas
+                    const dates = []
+                    let currentDate = new Date(dateRange.start)
+                    const endDate = new Date(dateRange.end)
+                    // Ajuste de zona horaria para iteración segura
+                    currentDate.setHours(0,0,0,0)
+                    endDate.setHours(0,0,0,0)
+
+                    while (currentDate <= endDate) {
+                        dates.push(new Date(currentDate))
+                        currentDate.setDate(currentDate.getDate() + 1)
+                    }
+
+                    // 4. Indexar asistencias existentes para búsqueda rápida: date_string -> employee_id -> record
+                    const attendanceMap = {}
+                    attData.forEach(att => {
+                        if (!attendanceMap[att.work_date]) {
+                            attendanceMap[att.work_date] = {}
+                        }
+                        attendanceMap[att.work_date][att.employee_id] = att
+                    })
+
+                    // 5. Construir reporte completo (Cross-Join: Fechas x Empleados)
+                    data = []
+                    
+                    // Ordenar fechas descendente
+                    dates.sort((a, b) => b - a).forEach(d => {
+                        const dateStr = d.toISOString().split('T')[0]
+                        
+                        allEmployees.forEach(emp => {
+                            // Buscar si existe registro
+                            const record = attendanceMap[dateStr]?.[emp.id]
+                            
+                            // Helpers (reutilizados)
+                            const formatTime = (timeStr) => {
+                                if (!timeStr) return '-'
+                                try {
+                                    const date = new Date(timeStr)
+                                    if (isNaN(date.getTime())) return timeStr
+                                    return date.toLocaleTimeString('es-PE', {
+                                        timeZone: 'America/Lima',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hour12: true
+                                    }).toUpperCase()
+                                } catch (e) {
+                                    return timeStr
+                                }
+                            }
+
+                            const getStatusText = (item) => {
+                                if (!item) return 'AUSENCIA'; // Si no hay registro es ausencia implícita
+                                const t = item.record_type;
+                                if (t === 'ASISTENCIA') return item.is_late ? 'TARDANZA' : 'PUNTUAL';
+                                if (t === 'FALTA JUSTIFICADA' || t === 'AUSENCIA SIN JUSTIFICAR') return 'AUSENCIA';
+                                if (t === 'DESCANSO MÉDICO') return 'DESCANSO MÉDICO';
+                                if (t === 'LICENCIA CON GOCE') return 'LICENCIA';
+                                if (t === 'VACACIONES') return 'VACACIONES';
+                                return t || 'AUSENTE';
+                            };
+
+                            const getLabel = (item) => {
+                                const status = getStatusText(item);
+                                const t = item?.record_type;
+                                if (status === 'AUSENCIA' || 
+                                    ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(t) ||
+                                    item?.status === 'absent') {
+                                    return 'AUSENTISMO';
+                                }
+                                return 'ASISTENCIA';
+                            };
+
+                            if (record) {
+                                // Caso: Registro existente
+                                data.push({
+                                    'Fecha': record.work_date,
+                                    'DNI': record.employees?.dni || emp.dni,
+                                    'Empleado': record.employees?.full_name || emp.full_name,
+                                    'Sede': record.employees?.sede || emp.sede,
+                                    'Ingreso': formatTime(record.check_in),
+                                    'Salida': formatTime(record.check_out),
+                                    'Estado': getStatusText(record),
+                                    'Tipo': record.record_type,
+                                    'AUSENTISMO': getLabel(record),
+                                    'Validado': record.is_validated ? 'SÍ' : 'NO'
+                                })
+                            } else {
+                                // Caso: Ausencia implícita (No hay registro)
+                                data.push({
+                                    'Fecha': dateStr,
+                                    'DNI': emp.dni,
+                                    'Empleado': emp.full_name,
+                                    'Sede': emp.sede,
+                                    'Ingreso': '-',
+                                    'Salida': '-',
+                                    'Estado': 'AUSENCIA',
+                                    'Tipo': 'AUSENCIA',
+                                    'AUSENTISMO': 'AUSENTISMO',
+                                    'Validado': 'NO'
+                                })
+                            }
+                        })
+                    })
+                    
                     fileName = `Asistencias_${sedeSuffix}_${dateRange.start}_al_${dateRange.end}.xlsx`
                     sheetName = 'Asistencias'
                     break
@@ -138,18 +242,33 @@ export default function ReportsCenter() {
                     const { data: vacData } = await getVacationBalanceReport(
                         selectedSede === 'all' ? null : selectedSede
                     )
-                    data = vacData.map(v => ({
-                        'DNI': v.dni,
-                        'Empleado': v.full_name,
-                        'Sede': v.sede,
-                        'Unidad Negocio': v.business_unit || '-',
-                        'Fecha Ingreso': v.entry_date,
-                        'Años Servicio': v.years_service,
-                        'Días Ganados': v.earned_days,
-                        'Días Gozados': parseFloat(v.legacy_taken || 0) + parseFloat(v.app_taken || 0),
-                        'Saldo Actual': v.balance,
-                        'Estado': v.status
-                    }))
+                    data = vacData.map(v => {
+                        // Calcular años de servicio automáticamente
+                        let yearsService = v.years_service;
+                        if (v.entry_date) {
+                            const entry = new Date(v.entry_date);
+                            const today = new Date();
+                            let years = today.getFullYear() - entry.getFullYear();
+                            const m = today.getMonth() - entry.getMonth();
+                            if (m < 0 || (m === 0 && today.getDate() < entry.getDate())) {
+                                years--;
+                            }
+                            yearsService = Math.max(0, years);
+                        }
+
+                        return {
+                            'DNI': v.dni,
+                            'Empleado': v.full_name,
+                            'Sede': v.sede,
+                            'Unidad Negocio': v.business_unit || '-',
+                            'Fecha Ingreso': v.entry_date,
+                            'Años Servicio': yearsService,
+                            'Días Ganados': Math.trunc(v.earned_days || 0),
+                            'Días Gozados': Math.trunc(parseFloat(v.legacy_taken || 0) + parseFloat(v.app_taken || 0)),
+                            'Saldo Actual': Math.trunc(v.balance || 0),
+                            'Estado': v.status
+                        }
+                    })
                     fileName = `Saldos_Vacaciones_${sedeSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`
                     sheetName = 'Vacaciones'
                     break
