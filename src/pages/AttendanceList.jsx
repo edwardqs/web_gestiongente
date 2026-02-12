@@ -34,7 +34,7 @@ export default function AttendanceList() {
     const [totalRecords, setTotalRecords] = useState(0)
     const PAGE_SIZE = 20
 
-    // Helper para obtener fecha local en formato YYYY-MM-DD
+    // Helper para obtener fecha local del ORDENADOR en formato YYYY-MM-DD
     const getLocalDate = () => {
         const d = new Date()
         const year = d.getFullYear()
@@ -72,15 +72,16 @@ export default function AttendanceList() {
         }
     }
 
-    // Inicializar filtros con fecha actual por defecto
+    // Inicializar filtros siempre con fecha actual
     const initializeFilters = () => {
         const savedFilters = loadSavedFilters()
         const today = getLocalDate()
         
+        // Siempre usar la fecha actual como valor por defecto
         return {
             status: savedFilters?.status || 'all',
-            dateFrom: savedFilters?.dateFrom || today, // Por defecto: hoy
-            dateTo: savedFilters?.dateTo || '', // Sin fecha final por defecto
+            dateFrom: savedFilters?.dateFrom || today,
+            dateTo: savedFilters?.dateTo || today,
             search: savedFilters?.search || ''
         }
     }
@@ -104,12 +105,9 @@ export default function AttendanceList() {
         // Permisos por Cargo (Legacy/Fallback)
         if (!user.position) return false
         
-        // Normalizamos quitando tildes para evitar problemas de compatibilidad
         const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
-        
         const userPosition = normalize(user.position);
         
-        // Lista extendida de cargos permitidos
         const allowedPositions = [
             'ANALISTA DE GENTE Y GESTION',
             'JEFE DE AREA DE GENTE Y GESTION',
@@ -123,26 +121,11 @@ export default function AttendanceList() {
 
     const hasValidationPermission = canValidate()
     
-    // Ref para controlar la primera carga
     const isFirstRender = useRef(true)
 
-    // Helper para aplicar filtros
+    // Helper para aplicar filtros - CORREGIDO
     const applyFilters = (query, currentFilters) => {
-        if (currentFilters.status === 'on_time') {
-            query = query.eq('record_type', 'ASISTENCIA').eq('is_late', false)
-        } else if (currentFilters.status === 'late') {
-            query = query.eq('record_type', 'ASISTENCIA').eq('is_late', true)
-        } else if (currentFilters.status === 'absent') {
-             query = query.or('record_type.in.(AUSENCIA,INASISTENCIA,FALTA JUSTIFICADA,AUSENCIA SIN JUSTIFICAR),check_in.is.null')
-        } else if (currentFilters.status === 'medical') {
-            query = query.eq('record_type', 'DESCANSO MÉDICO')
-        } else if (currentFilters.status === 'license') {
-            query = query.eq('record_type', 'LICENCIA CON GOCE')
-        } else if (currentFilters.status === 'vacation') {
-            query = query.eq('record_type', 'VACACIONES')
-        }
-
-        // CRÍTICO: Aplicar filtros de fecha correctamente
+        // Aplicar filtros de fecha PRIMERO (antes de los filtros de estado)
         if (currentFilters.dateFrom) {
             query = query.gte('work_date', currentFilters.dateFrom)
         }
@@ -150,11 +133,27 @@ export default function AttendanceList() {
             query = query.lte('work_date', currentFilters.dateTo)
         }
         
+        // Luego aplicar filtros de estado
+        if (currentFilters.status === 'on_time') {
+            query = query.eq('record_type', 'ASISTENCIA').eq('is_late', false)
+        } else if (currentFilters.status === 'late') {
+            query = query.eq('record_type', 'ASISTENCIA').eq('is_late', true)
+        } else if (currentFilters.status === 'absent') {
+            // Para ausencias: NO aplicar filtro SQL aquí, lo haremos en memoria después
+            // Esto es más confiable que usar operadores OR complejos en Supabase
+            // El filtrado real se hará en la sección "Filtrado de seguridad"
+        } else if (currentFilters.status === 'medical') {
+            query = query.eq('record_type', 'DESCANSO MÉDICO')
+        } else if (currentFilters.status === 'license') {
+            query = query.eq('record_type', 'LICENCIA CON GOCE')
+        } else if (currentFilters.status === 'vacation') {
+            query = query.eq('record_type', 'VACACIONES')
+        }
+        
         return query
     }
 
     useEffect(() => {
-        // Cuando cambian los filtros, volver a página 1
         if (currentPage === 1) {
             loadAttendances(1)
         } else {
@@ -163,16 +162,13 @@ export default function AttendanceList() {
     }, [filters])
 
     useEffect(() => {
-        // Evitar doble carga en el montaje inicial
         if (isFirstRender.current) {
             isFirstRender.current = false
             return
         }
-        
         loadAttendances(currentPage)
     }, [currentPage])
 
-    // Escuchar actualizaciones en tiempo real
     useEffect(() => {
         const subscription = supabase
             .channel('attendance_list_updates')
@@ -202,24 +198,20 @@ export default function AttendanceList() {
                 user?.position?.includes('JEFE DE GENTE') ||
                 user?.position?.includes('JEFE DE RRHH') ||
                 (user?.permissions && user?.permissions['*'])
-            ) && !user?.position?.includes('ANALISTA'); // Asegurar que Analistas SIEMPRE pasen por filtro de sede
+            ) && !user?.position?.includes('ANALISTA');
 
-            console.log('User Role:', user?.role, 'Position:', user?.position, 'Is Global Admin:', isGlobalAdmin)
-
-            // SIEMPRE usar consulta histórica (rango de fechas) en lugar de RPC diaria
-            // Esto permite ver cualquier rango de fechas, no solo "hoy"
-            // FIX: Si dateTo está vacío, asumir que es "Modo Día Único" para dateFrom (Roster View)
-            let isSingleDate = filters.dateFrom && (!filters.dateTo || filters.dateFrom === filters.dateTo)
+            // Detectar si estamos viendo un solo día (modo reporte diario / Roster)
+            // IMPORTANTE: Solo usar modo Roster si el filtro de estado es general
+            // Los estados específicos (medical, license, vacation) deben usar el modo histórico
+            let isSingleDate = filters.dateFrom && filters.dateTo && (filters.dateFrom === filters.dateTo)
+            let useRosterMode = isSingleDate && ['all', 'on_time', 'late', 'absent'].includes(filters.status)
             
             let reportData = []
             let totalRows = 0
 
-            // MODO REPORTE DIARIO (Roster)
-            // Si se selecciona una fecha única (o solo Desde), mostramos TODOS los empleados y su estado
-            if (isSingleDate) {
-                console.log('Loading Daily Roster Mode for:', filters.dateFrom)
+            // MODO REPORTE DIARIO (Roster) - Solo para estados generales
+            if (useRosterMode) {
                 
-                // Determinar sede/business unit para la RPC
                 let rpcSede = null
                 let rpcBusinessUnit = null
                 
@@ -233,9 +225,10 @@ export default function AttendanceList() {
                     p_sede: rpcSede,
                     p_business_unit: rpcBusinessUnit,
                     p_search: filters.search || null,
-                    p_status: filters.status === 'all' ? null : filters.status,
-                    p_page: page,
-                    p_limit: PAGE_SIZE
+                    // Para 'absent' pasamos null y filtramos en memoria (más confiable)
+                    p_status: (filters.status === 'all' || filters.status === 'absent') ? null : filters.status,
+                    p_page: filters.status === 'absent' ? 1 : page,  // Siempre página 1 para absent
+                    p_limit: filters.status === 'absent' ? 1000 : PAGE_SIZE  // Límite alto para traer todos
                 })
 
                 if (rpcError) throw rpcError
@@ -245,45 +238,68 @@ export default function AttendanceList() {
                     totalRows = rpcData.total || 0
                 }
 
-                // Mapear al formato esperado por la tabla
-                let processedList = reportData.map(item => ({
-                    id: item.attendance_id || `virtual-${item.employee_id}`, // ID virtual si no hay asistencia
-                    work_date: filters.dateFrom,
-                    check_in: item.check_in,
-                    check_out: item.check_out,
-                    is_late: item.is_late || false,
-                    record_type: item.record_type || (item.computed_status === 'absent' ? null : item.record_type),
-                    status: item.computed_status, // present, absent, late, on_time
-                    validated: item.validated,
-                    absence_reason: item.absence_reason,
-                    location_in: item.location_in,
-                    employees: {
-                        full_name: item.full_name,
-                        dni: item.dni,
-                        position: item.position,
-                        sede: item.sede,
-                        business_unit: item.business_unit,
-                        profile_picture_url: item.profile_picture_url
+                // Obtener vacaciones activas para la fecha
+                const { data: vacations } = await supabase
+                    .from('vacation_requests')
+                    .select('employee_id')
+                    .eq('status', 'APROBADO')
+                    .lte('start_date', filters.dateFrom)
+                    .gte('end_date', filters.dateFrom)
+
+                const vacationEmployeeIds = new Set(vacations?.map(v => v.employee_id) || [])
+
+                let processedList = reportData.map(item => {
+                    // Verificar si tiene vacaciones
+                    const isOnVacation = vacationEmployeeIds.has(item.employee_id)
+                    // Si tiene vacación y no ha marcado asistencia (o tiene falta injustificada automática), forzamos visualización de Vacaciones
+                    const shouldShowVacation = isOnVacation && (!item.check_in || ['INASISTENCIA', 'FALTA_INJUSTIFICADA', 'AUSENCIA'].includes(item.record_type))
+
+                    return {
+                        id: item.attendance_id || `virtual-${item.employee_id}`,
+                        employee_id: item.employee_id, // Guardamos ID crudo para referencias
+                        work_date: filters.dateFrom,
+                        check_in: item.check_in,
+                        check_out: item.check_out,
+                        is_late: item.is_late || false,
+                        record_type: shouldShowVacation ? 'VACACIONES' : (item.record_type || (item.computed_status === 'absent' ? null : item.record_type)),
+                        status: shouldShowVacation ? 'vacation' : item.computed_status,
+                        validated: item.validated,
+                        absence_reason: shouldShowVacation ? 'VACACIONES' : item.absence_reason,
+                        location_in: item.location_in,
+                        employees: {
+                            full_name: item.full_name,
+                            dni: item.dni,
+                            position: item.position,
+                            sede: item.sede,
+                            business_unit: item.business_unit,
+                            profile_picture_url: item.profile_picture_url
+                        }
                     }
-                }))
+                })
+
+                // Filtrado adicional en memoria para estado "absent" (medida de seguridad)
+                if (filters.status === 'absent') {
+                    processedList = processedList.filter(item => {
+                        const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(item.record_type)
+                        const isImplicitAbsence = !item.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(item.record_type)
+                        const isComputedAbsent = item.status === 'absent'
+                        return isAbsenceType || isImplicitAbsence || isComputedAbsent
+                    })
+                    // Actualizar total después del filtrado
+                    totalRows = processedList.length
+                    
+                    // Aplicar paginación en memoria
+                    const start = (page - 1) * PAGE_SIZE
+                    processedList = processedList.slice(start, start + PAGE_SIZE)
+                }
 
                 setAttendances(processedList)
                 setTotalRecords(totalRows)
                 setTotalPages(Math.ceil(totalRows / PAGE_SIZE))
                 
-                // Calcular estadísticas para Roster (usando contadores reales de la DB si es posible, o aproximando con paginación)
-                // Nota: La RPC actual devuelve el total paginado. Para stats globales exactas necesitaríamos otra RPC o que esta devuelva metadata.
-                // Por ahora, para no romper, usaremos lo que tenemos en pantalla o una estimación si es admin.
-                // MEJORA: Calcular stats basados en el total devuelto por RPC si implementamos contadores allí.
-                // Como parche rápido: Si es admin y single date, asumimos que totalRows es el total de empleados.
-                // Y absent = totalRows - (present + late + onTime de la DB).
-                // Pero sin hacer otra query es difícil.
-                // Vamos a dejar que las stats se calculen sobre lo visible o ajustar visualmente.
-                
-                // FIX CRÍTICO: Las stats globales deben reflejar el TOTAL REAL, no solo la página actual.
-                // Llamar a la RPC get_daily_attendance_stats para obtener contadores reales.
+                // Obtener estadísticas globales para el día seleccionado
                 if (page === 1) { 
-                     try {
+                      try {
                         const { data: statsData, error: statsError } = await supabase.rpc('get_daily_attendance_stats', {
                             p_date: filters.dateFrom,
                             p_sede: rpcSede,
@@ -301,69 +317,125 @@ export default function AttendanceList() {
                                 absent: statsData.absent
                             })
                         }
-                     } catch (err) {
+                      } catch (err) {
                         console.error('Stats fetch error:', err)
-                     }
+                      }
                 }
 
                 setLoading(false)
-                return // Salir, ya cargamos los datos
+                return
             }
 
-            // MODO HISTÓRICO (Rango de Fechas)
-            let query = supabase
-                .from('attendance')
-                .select(`
-                    *,
-                    employees!attendance_employee_id_fkey (
-                        full_name,
-                        dni,
-                        position,
-                        sede,
-                        business_unit,
-                        profile_picture_url
-                    )
-                `, { count: 'exact' })
-                .order('work_date', { ascending: false })
-                .order('check_in', { ascending: true })
-
-            // Aplicar filtros de fecha
-            if (filters.dateFrom) {
-                query = query.gte('work_date', filters.dateFrom)
-            }
-            if (filters.dateTo) {
-                query = query.lte('work_date', filters.dateTo)
-            }
-
-            // Si NO hay filtro de fecha "desde", usar el mes actual por defecto
-            if (!filters.dateFrom && !filters.dateTo) {
-                const today = getLocalDate()
-                const firstDayOfMonth = today.substring(0, 8) + '01' // YYYY-MM-01
-                query = query.gte('work_date', firstDayOfMonth)
-            }
-
-            // Aplicar filtros de estado
-            query = applyFilters(query, filters)
-
-            // Búsqueda por texto (optimizada para evitar errores de Supabase con joins)
-            // Nota: La búsqueda en campos anidados (employees.*) no funciona directamente en el filtro
-            // Se filtrará en memoria después de la consulta
-
-            // Paginación
-            if (isGlobalAdmin) {
-                query = query.range(offset, offset + PAGE_SIZE - 1)
-            } else {
-                // Para usuarios restringidos, traemos más datos para filtrar localmente
-                query = query.limit(1000)
-            }
-
-            const { data, error, count } = await query
-            if (error) throw error
+            // MODO HISTÓRICO (Rango de Fechas o Estados Específicos)
+            // Se usa cuando:
+            // - dateFrom != dateTo (rango de fechas)
+            // - Estado específico: medical, license, vacation (incluso si dateFrom == dateTo)
             
-            reportData = data || []
-            totalRows = count || 0
+            // CASO ESPECIAL: FILTRO DE VACACIONES
+            // Como no se crean registros diarios en 'attendance' para vacaciones, consultamos 'vacation_requests'
+            if (filters.status === 'vacation') {
+                 const { data: vacationRequests, error: vacError } = await supabase
+                    .from('vacation_requests')
+                    .select(`
+                        *,
+                        employees!vacation_requests_employee_id_fkey (
+                            full_name, dni, position, sede, business_unit, profile_picture_url
+                        )
+                    `)
+                    .eq('status', 'APROBADO')
+                    // Solapamiento de fechas: (start <= filtro_end) AND (end >= filtro_start)
+                    .lte('start_date', filters.dateTo)
+                    .gte('end_date', filters.dateFrom)
+                
+                 if (vacError) throw vacError
 
-            // Procesar lista y aplicar filtros de seguridad
+                 // Expandir rangos a días individuales
+                 let expandedVacations = []
+                 const fromDate = new Date(filters.dateFrom)
+                 const toDate = new Date(filters.dateTo)
+                 // Ajuste zona horaria simple (asumiendo fechas YYYY-MM-DD sin hora)
+                 fromDate.setHours(0,0,0,0)
+                 toDate.setHours(0,0,0,0)
+
+                 vacationRequests.forEach(req => {
+                     // Parsear fechas de solicitud (asegurando que se traten como locales o UTC consistente)
+                     // req.start_date viene como YYYY-MM-DD string
+                     const [sY, sM, sD] = req.start_date.split('-').map(Number)
+                     const [eY, eM, eD] = req.end_date.split('-').map(Number)
+                     
+                     let current = new Date(sY, sM - 1, sD)
+                     const end = new Date(eY, eM - 1, eD)
+                     
+                     // Ajustar inicio al rango del filtro si la vacación empezó antes
+                     if (current < fromDate) current = new Date(fromDate)
+                     
+                     // Iterar día por día
+                     while (current <= end && current <= toDate) {
+                         const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`
+                         
+                         expandedVacations.push({
+                             id: `vac-${req.id}-${dateStr}`,
+                             work_date: dateStr,
+                             check_in: null,
+                             check_out: null,
+                             is_late: false,
+                             record_type: 'VACACIONES',
+                             status: 'vacation',
+                             validated: true,
+                             notes: req.notes,
+                             absence_reason: 'VACACIONES',
+                             evidence_url: null,
+                             location_in: null,
+                             validated_by: null,
+                             employees: req.employees
+                         })
+                         current.setDate(current.getDate() + 1)
+                     }
+                 })
+
+                 // Ordenar por fecha descendente
+                 expandedVacations.sort((a, b) => b.work_date.localeCompare(a.work_date))
+                 reportData = expandedVacations
+
+            } else {
+                // MODO HISTÓRICO NORMAL (Consulta a attendance)
+                let query = supabase
+                    .from('attendance')
+                    .select(`
+                        *,
+                        employees!attendance_employee_id_fkey (
+                            full_name,
+                            dni,
+                            position,
+                            sede,
+                            business_unit,
+                            profile_picture_url
+                        )
+                    `, { count: 'exact' })
+                    .order('work_date', { ascending: false })
+                    .order('check_in', { ascending: true })
+
+                // Aplicar filtros (fecha y estado) usando la función corregida
+                query = applyFilters(query, filters)
+
+                // Aplicar restricciones de paginación/límite
+                if (isGlobalAdmin) {
+                    if (filters.status !== 'all' && filters.status !== 'absent' && filters.status !== 'on_time' && filters.status !== 'late') {
+                        query = query.limit(1000)
+                    } else {
+                        query = query.range(offset, offset + PAGE_SIZE - 1)
+                    }
+                } else {
+                    query = query.limit(1000)
+                }
+
+                const { data, error, count: queryCount } = await query
+                if (error) throw error
+                
+                reportData = data || []
+                totalRows = queryCount || 0
+            }
+            
             let processedList = reportData.map(item => ({
                 id: item.id,
                 work_date: item.work_date,
@@ -391,7 +463,7 @@ export default function AttendanceList() {
                 }
             }
 
-            // Filtrado por búsqueda (en memoria, después de traer los datos)
+            // Filtrado por búsqueda en memoria
             if (filters.search && filters.search.length > 0) {
                 const searchLower = filters.search.toLowerCase()
                 processedList = processedList.filter(item => 
@@ -400,42 +472,46 @@ export default function AttendanceList() {
                 )
             }
 
-            // Paginación manual si se filtró en cliente
+            // Filtrado por estado "absent" en memoria (más confiable que SQL complejo)
+            if (filters.status === 'absent') {
+                processedList = processedList.filter(item => {
+                    // Es ausencia si:
+                    const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(item.record_type)
+                    const isImplicitAbsence = !item.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(item.record_type)
+                    return isAbsenceType || isImplicitAbsence
+                })
+            }
+
             let displayList = processedList
-            if (!isGlobalAdmin) {
+            
+            if (!isGlobalAdmin || (filters.status !== 'all' && filters.status !== 'absent' && filters.status !== 'on_time' && filters.status !== 'late')) {
                 totalRows = processedList.length
                 const start = (page - 1) * PAGE_SIZE
                 displayList = processedList.slice(start, start + PAGE_SIZE)
+            } else {
+                // Si ya tenemos totalRows de la consulta (queryCount), lo usamos.
+                // Si no (caso vacaciones o roster), usamos la longitud de la lista procesada.
+                if (filters.status === 'vacation' || useRosterMode) {
+                     totalRows = processedList.length
+                }
             }
 
             setAttendances(displayList)
             setTotalRecords(totalRows)
             setTotalPages(Math.ceil(totalRows / PAGE_SIZE) || 1)
 
-            // Calcular estadísticas
-            if (isGlobalAdmin) {
-                // Para admin, calcular stats de los datos filtrados
-                const total = processedList.length
-                const onTime = processedList.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
-                const late = processedList.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
-                const absent = processedList.filter(i => 
-                    !i.record_type || 
-                    ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR'].includes(i.record_type)
-                ).length
-                
-                setGlobalStats({ total, onTime, late, absent })
-            } else {
-                // Para usuario restringido, usar processedList completo (ya filtrado)
-                const total = processedList.length
-                const onTime = processedList.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
-                const late = processedList.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
-                const absent = processedList.filter(i => 
-                    !i.record_type || 
-                    ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR'].includes(i.record_type)
-                ).length
-                
-                setGlobalStats({ total, onTime, late, absent })
-            }
+            // Calcular estadísticas simples para modo histórico
+            const total = processedList.length
+            const onTime = processedList.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
+            const late = processedList.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
+            // Para ausencias: incluir registros sin check_in (excluyendo tipos específicos) O con record_type de ausencia
+            const absent = processedList.filter(i => {
+                const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(i.record_type)
+                const isImplicitAbsence = !i.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(i.record_type)
+                return isAbsenceType || isImplicitAbsence
+            }).length
+            
+            setGlobalStats({ total, onTime, late, absent })
 
         } catch (error) {
             console.error('Error cargando asistencias:', error)
@@ -445,7 +521,6 @@ export default function AttendanceList() {
         }
     }
 
-    // Estado para stats globales
     const [globalStats, setGlobalStats] = useState({
         total: 0,
         onTime: 0,
@@ -457,58 +532,217 @@ export default function AttendanceList() {
         try {
             setExporting(true)
             
-            // Usar las fechas de los filtros actuales
             let startDate = filters.dateFrom
             let endDate = filters.dateTo
 
-            // Si no hay fechas, usar el mes actual
-            if (!startDate) {
-                const now = new Date()
-                const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-                startDate = firstDay.toISOString().split('T')[0]
-            }
+            if (!startDate) startDate = getLocalDate()
+            if (!endDate) endDate = getLocalDate()
 
-            if (!endDate) {
-                const now = new Date()
-                const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-                endDate = lastDay.toISOString().split('T')[0]
-            }
+            // 1. Determinar el modo de operación (Roster vs Histórico)
+            const isGlobalAdmin = (
+                user?.role === 'ADMIN' || 
+                user?.role === 'SUPER ADMIN' || 
+                user?.role === 'JEFE_RRHH' || 
+                user?.position?.includes('JEFE DE GENTE') ||
+                user?.position?.includes('JEFE DE RRHH') ||
+                (user?.permissions && user?.permissions['*'])
+            ) && !user?.position?.includes('ANALISTA');
 
-            // Consulta directa (sin RPC) para obtener todos los datos del rango
-            let query = supabase
-                .from('attendance')
-                .select(`
-                    *,
-                    employees!attendance_employee_id_fkey (
-                        full_name,
-                        dni,
-                        position,
-                        sede,
-                        business_unit
+            let isSingleDate = startDate && endDate && (startDate === endDate)
+            // Solo usar modo Roster si el filtro de estado es general (all, on_time, late, absent)
+            let useRosterMode = isSingleDate && ['all', 'on_time', 'late', 'absent'].includes(filters.status)
+
+            let exportData = []
+
+            if (useRosterMode) {
+                // MODO REPORTE DIARIO (Roster) - Trae a todos los empleados
+                let rpcSede = null
+                let rpcBusinessUnit = null
+                
+                if (!isGlobalAdmin) {
+                    if (user?.sede) rpcSede = user.sede
+                    if (user?.business_unit) rpcBusinessUnit = user.business_unit
+                }
+
+                const { data: rpcData, error: rpcError } = await supabase.rpc('get_daily_attendance_report', {
+                    p_date: startDate,
+                    p_sede: rpcSede,
+                    p_business_unit: rpcBusinessUnit,
+                    p_search: filters.search || null,
+                    p_status: (filters.status === 'all' || filters.status === 'absent') ? null : filters.status,
+                    p_page: 1,
+                    p_limit: 10000 // Límite alto para exportar todo
+                })
+
+                if (rpcError) throw rpcError
+
+                if (rpcData && rpcData.data) {
+                    // Obtener vacaciones activas para la fecha (Igual que en loadAttendances)
+                    const { data: vacations } = await supabase
+                        .from('vacation_requests')
+                        .select('employee_id')
+                        .eq('status', 'APROBADO')
+                        .lte('start_date', startDate)
+                        .gte('end_date', startDate)
+
+                    const vacationEmployeeIds = new Set(vacations?.map(v => v.employee_id) || [])
+
+                    exportData = rpcData.data.map(item => {
+                        // Lógica de vacaciones
+                        const isOnVacation = vacationEmployeeIds.has(item.employee_id)
+                        const shouldShowVacation = isOnVacation && (!item.check_in || ['INASISTENCIA', 'FALTA_INJUSTIFICADA', 'AUSENCIA'].includes(item.record_type))
+
+                        return {
+                            work_date: startDate,
+                            employees: {
+                                full_name: item.full_name,
+                                dni: item.dni,
+                                position: item.position,
+                                sede: item.sede,
+                                business_unit: item.business_unit
+                            },
+                            check_in: item.check_in,
+                            check_out: item.check_out,
+                            is_late: item.is_late || false,
+                            record_type: shouldShowVacation ? 'VACACIONES' : (item.record_type || (item.computed_status === 'absent' ? null : item.record_type)),
+                            status: shouldShowVacation ? 'vacation' : item.computed_status,
+                            validated: item.validated,
+                            absence_reason: shouldShowVacation ? 'VACACIONES' : item.absence_reason,
+                            notes: item.absence_reason // Usar absence_reason como notas/motivo si no hay notas
+                        }
+                    })
+                }
+
+                // Filtrado adicional en memoria para estado "absent" (igual que en loadAttendances)
+                if (filters.status === 'absent') {
+                    exportData = exportData.filter(item => {
+                        const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(item.record_type)
+                        const isImplicitAbsence = !item.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(item.record_type)
+                        const isComputedAbsent = item.status === 'absent'
+                        return isAbsenceType || isImplicitAbsence || isComputedAbsent
+                    })
+                }
+
+            } else if (filters.status === 'vacation') {
+                // MODO HISTÓRICO - VACACIONES (Consulta a vacation_requests)
+                const { data: vacationRequests, error: vacError } = await supabase
+                    .from('vacation_requests')
+                    .select(`
+                        *,
+                        employees!vacation_requests_employee_id_fkey (
+                            full_name, dni, position, sede, business_unit, profile_picture_url
+                        )
+                    `)
+                    .eq('status', 'APROBADO')
+                    .lte('start_date', endDate)
+                    .gte('end_date', startDate)
+                
+                 if (vacError) throw vacError
+
+                 // Expandir rangos a días individuales
+                 let expandedVacations = []
+                 const fromDate = new Date(startDate)
+                 const toDate = new Date(endDate)
+                 fromDate.setHours(0,0,0,0)
+                 toDate.setHours(0,0,0,0)
+
+                 vacationRequests.forEach(req => {
+                     const [sY, sM, sD] = req.start_date.split('-').map(Number)
+                     const [eY, eM, eD] = req.end_date.split('-').map(Number)
+                     
+                     let current = new Date(sY, sM - 1, sD)
+                     const end = new Date(eY, eM - 1, eD)
+                     
+                     if (current < fromDate) current = new Date(fromDate)
+                     
+                     while (current <= end && current <= toDate) {
+                         const dateStr = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`
+                         
+                         expandedVacations.push({
+                             work_date: dateStr,
+                             employees: req.employees,
+                             check_in: null,
+                             check_out: null,
+                             is_late: false,
+                             record_type: 'VACACIONES',
+                             status: 'vacation',
+                             validated: true,
+                             notes: req.notes,
+                             absence_reason: 'VACACIONES'
+                         })
+                         current.setDate(current.getDate() + 1)
+                     }
+                 })
+
+                 expandedVacations.sort((a, b) => b.work_date.localeCompare(a.work_date))
+                 exportData = expandedVacations
+
+            } else {
+                // MODO HISTÓRICO - Solo registros existentes
+                let query = supabase
+                    .from('attendance')
+                    .select(`
+                        *,
+                        employees!attendance_employee_id_fkey (
+                            full_name,
+                            dni,
+                            position,
+                            sede,
+                            business_unit
+                        )
+                    `)
+                    .gte('work_date', startDate)
+                    .lte('work_date', endDate)
+                    .order('work_date', { ascending: false })
+
+                // Aplicar filtros básicos de estado
+                if (filters.status === 'on_time') {
+                    query = query.eq('record_type', 'ASISTENCIA').eq('is_late', false)
+                } else if (filters.status === 'late') {
+                    query = query.eq('record_type', 'ASISTENCIA').eq('is_late', true)
+                } else if (filters.status === 'medical') {
+                    query = query.eq('record_type', 'DESCANSO MÉDICO')
+                } else if (filters.status === 'license') {
+                    query = query.eq('record_type', 'LICENCIA CON GOCE')
+                } else if (filters.status === 'vacation') {
+                    query = query.eq('record_type', 'VACACIONES')
+                }
+
+                const { data, error } = await query
+                if (error) throw error
+                
+                exportData = data || []
+
+                // Filtrado de seguridad (igual que loadAttendances)
+                if (!isGlobalAdmin) {
+                    if (user?.sede) {
+                        exportData = exportData.filter(item => item.employees.sede === user.sede)
+                    }
+                    if (user?.business_unit) {
+                        exportData = exportData.filter(item => item.employees.business_unit === user.business_unit)
+                    }
+                }
+
+                // Filtrado por búsqueda
+                if (filters.search) {
+                    const searchLower = filters.search.toLowerCase()
+                    exportData = exportData.filter(item => 
+                        item.employees?.full_name?.toLowerCase().includes(searchLower) || 
+                        item.employees?.dni?.toLowerCase().includes(searchLower)
                     )
-                `)
-                .gte('work_date', startDate)
-                .lte('work_date', endDate)
-                .order('work_date', { ascending: false })
+                }
 
-            query = applyFilters(query, filters)
-
-            const { data: exportData, error } = await query
-
-            if (error) throw error
-
-            // Filtrar por búsqueda si es necesario
-            let filteredExportData = exportData || []
-            if (filters.search) {
-                const searchLower = filters.search.toLowerCase()
-                filteredExportData = filteredExportData.filter(item => 
-                    item.employees?.full_name?.toLowerCase().includes(searchLower) || 
-                    item.employees?.dni?.toLowerCase().includes(searchLower)
-                )
+                // Filtrado 'absent' en histórico
+                if (filters.status === 'absent') {
+                    exportData = exportData.filter(item => {
+                        const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(item.record_type)
+                        const isImplicitAbsence = !item.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(item.record_type)
+                        return isAbsenceType || isImplicitAbsence
+                    })
+                }
             }
 
-            // Formatear datos para Excel
-            const formattedData = filteredExportData.map(item => {
+            const formattedData = exportData.map(item => {
                 const getStatusText = (i) => {
                     const t = i.record_type;
                     if (t === 'ASISTENCIA') return i.is_late ? 'TARDANZA' : 'PUNTUAL';
@@ -545,11 +779,9 @@ export default function AttendanceList() {
                 };
             })
 
-            // Crear libro y hoja
             const wb = XLSX.utils.book_new()
             const ws = XLSX.utils.json_to_sheet(formattedData)
             
-            // Ajustar ancho de columnas
             const wscols = [
                 {wch: 12}, {wch: 30}, {wch: 12}, {wch: 20}, {wch: 15},
                 {wch: 12}, {wch: 12}, {wch: 15}, {wch: 15}, {wch: 8}, {wch: 40}
@@ -571,9 +803,7 @@ export default function AttendanceList() {
 
     async function handleValidate() {
         if (!validationModal) return
-
         const supervisorId = user?.employee_id;
-
         if (!supervisorId) {
             alert('Error: No se encontró un perfil de empleado asociado. No puedes validar asistencias.')
             return
@@ -581,7 +811,6 @@ export default function AttendanceList() {
 
         try {
             setValidating(true)
-
             const { data, error } = await supabase.rpc('supervisor_validate_attendance', {
                 p_attendance_id: validationModal.attendanceId,
                 p_supervisor_id: supervisorId,
@@ -590,16 +819,13 @@ export default function AttendanceList() {
             })
 
             if (error) throw error
-
             if (data?.success === false) {
                 throw new Error(data.message || 'Error validando asistencia')
             }
 
             await loadAttendances(currentPage)
-
             setValidationModal(null)
             setValidationNotes('')
-
             alert(validationModal.approved ? 'Asistencia aprobada correctamente' : 'Asistencia rechazada')
         } catch (error) {
             console.error('Error validando:', error)
@@ -634,14 +860,12 @@ export default function AttendanceList() {
             const label = type || 'OTRO';
             badgeContent = <span title={label} className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800 block truncate max-w-[100px] text-center">{label}</span>
         }
-        
         return badgeContent;
     }
 
     function getRecordTypeBadge(attendance) {
         const type = attendance.record_type;
         const subcategory = attendance.subcategory;
-
         let label = type;
         let colorClass = 'bg-gray-100 text-gray-800';
 
@@ -673,7 +897,6 @@ export default function AttendanceList() {
             default:
                 label = type || '-';
         }
-
         return <span title={label} className={`px-2 py-1 text-xs font-semibold rounded-full ${colorClass} block truncate max-w-[120px] text-center`}>{label}</span>
     }
 
@@ -681,7 +904,6 @@ export default function AttendanceList() {
         if (!dateString) return '';
         const [year, month, day] = dateString.split('-');
         const date = new Date(year, month - 1, day);
-        
         return date.toLocaleDateString('es-ES', {
             weekday: 'short',
             year: 'numeric',
@@ -706,9 +928,7 @@ export default function AttendanceList() {
         absent: globalStats.absent
     }
 
-    // ==========================================
-    // Lógica de Importación Masiva
-    // ==========================================
+    // Funciones de Importación
     const handleFileChange = (e) => {
         const file = e.target.files[0]
         if (file) {
@@ -724,14 +944,11 @@ export default function AttendanceList() {
             const workbook = XLSX.read(data, { type: 'array' })
             const sheetName = workbook.SheetNames[0]
             const sheet = workbook.Sheets[sheetName]
-            
             const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
-            
             if (jsonData.length < 2) {
                 alert('El archivo parece estar vacío o sin cabeceras.')
                 return
             }
-
             const rows = jsonData.slice(1).map((row, idx) => ({
                 id: idx,
                 dni: row[0],
@@ -740,15 +957,12 @@ export default function AttendanceList() {
                 checkOut: null,
                 isValid: validateRow(row)
             }))
-
             setImportPreview(rows)
         }
         reader.readAsArrayBuffer(file)
     }
 
-    const validateRow = (row) => {
-        return row[0] && row[1]
-    }
+    const validateRow = (row) => row[0] && row[1]
 
     const processExcelDate = (excelDate) => {
         if (typeof excelDate === 'number') {
@@ -757,59 +971,41 @@ export default function AttendanceList() {
         }
         if (typeof excelDate === 'string') {
             const dateStr = excelDate.trim()
-            
             const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
             if (dmyMatch) {
-                const day = dmyMatch[1].padStart(2, '0')
-                const month = dmyMatch[2].padStart(2, '0')
-                const year = dmyMatch[3]
-                return `${year}-${month}-${day}`
+                return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`
             }
-            
-            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-                return dateStr
-            }
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
         }
         return excelDate
     }
     
     const processExcelTime = (excelTime) => {
          if (!excelTime) return null
-         
          if (typeof excelTime === 'number') {
              const totalSeconds = Math.floor(excelTime * 86400)
              const hours = Math.floor(totalSeconds / 3600)
              const minutes = Math.floor((totalSeconds % 3600) / 60)
              return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`
          }
-         
          if (typeof excelTime === 'string') {
              const timeStr = excelTime.trim().toLowerCase()
-             
              const match = timeStr.match(/^(\d{1,2})[:.](\d{2})\s*([ap])\.?\s*m\.?$/)
-             
              if (match) {
                  let hours = parseInt(match[1])
                  const minutes = parseInt(match[2])
                  const meridiem = match[3]
-                 
                  if (meridiem === 'p' && hours < 12) hours += 12
                  if (meridiem === 'a' && hours === 12) hours = 0
-                 
                  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`
              }
-             
-             if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(timeStr)) {
-                 return timeStr
-             }
+             if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(timeStr)) return timeStr
          }
-
          return excelTime
     }
 
     const handleImport = async () => {
         if (importPreview.length === 0) return
-
         setImportLoading(true)
         try {
             const payload = importPreview
@@ -817,31 +1013,21 @@ export default function AttendanceList() {
                 .map(row => {
                     const dateStr = processExcelDate(row.date)
                     const timeStr = processExcelTime(row.checkIn)
-                    
                     let checkInTime = null
                     if (dateStr && timeStr) {
-                        // Construir fecha asumiendo zona horaria Perú (UTC-5)
                         try {
                             const peruDate = new Date(`${dateStr}T${timeStr}-05:00`)
-                            
-                            // Verificar si la fecha es válida
                             if (!isNaN(peruDate.getTime())) {
-                                // Extraemos SOLO la hora en formato UTC (HH:mm:ss)
-                                // Ejemplo: 08:45 Perú -> 13:45 UTC
-                                // La base de datos concatenará: "2026-02-10" + " " + "13:45:00"
-                                // Al guardarse como timestamp, se interpretará como 13:45 UTC
                                 checkInTime = peruDate.toISOString().split('T')[1].split('.')[0]
                             }
                         } catch (e) {
-                            console.error('Error procesando fecha:', e)
-                            checkInTime = timeStr // Fallback a la hora original si falla
+                            checkInTime = timeStr
                         }
                     }
-
                     return {
                         dni: String(row.dni).trim(),
                         work_date: dateStr,
-                        check_in: checkInTime, // Enviamos solo la hora HH:mm:ss (en UTC)
+                        check_in: checkInTime,
                         check_out: null, 
                         record_type: 'ASISTENCIA',
                         sede: user?.sede || null 
@@ -849,11 +1035,9 @@ export default function AttendanceList() {
                 })
 
             const result = await bulkImportAttendance(payload)
-            
-            // Verificar si hubo errores parciales reportados por el RPC
             if (result.error_count > 0) {
                 setImportResult({
-                    success: result.imported_count > 0, // Parcialmente exitoso si se importó algo
+                    success: result.imported_count > 0,
                     count: result.imported_count,
                     error_count: result.error_count,
                     errors: result.errors,
@@ -866,7 +1050,6 @@ export default function AttendanceList() {
                     message: 'Importación completada exitosamente'
                 })
             }
-            
             loadAttendances(1)
         } catch (error) {
             console.error('Error importando:', error)
@@ -894,21 +1077,27 @@ export default function AttendanceList() {
         XLSX.writeFile(wb, "plantilla_asistencias.xlsx")
     }
 
-    // Función para limpiar filtros
+    // Limpiar filtros - CORREGIDO para volver a la fecha actual
     const handleClearFilters = () => {
         const today = getLocalDate()
         setFilters({
             status: 'all',
+            search: '',
             dateFrom: today,
-            dateTo: '',
-            search: ''
+            dateTo: today
         })
     }
 
-    // Determinar si hay filtros activos
-    const hasActiveFilters = filters.search !== '' || 
-                            filters.status !== 'all' || 
-                            filters.dateTo !== ''
+    // Detectar si hay filtros activos - CORREGIDO
+    const hasActiveFilters = () => {
+        const today = getLocalDate()
+        return (
+            filters.search !== '' || 
+            filters.status !== 'all' || 
+            filters.dateFrom !== today || 
+            filters.dateTo !== today
+        )
+    }
 
     return (
         <div className="w-full">
@@ -1052,7 +1241,7 @@ export default function AttendanceList() {
                     </div>
                     
                     {/* Botón Limpiar Filtros */}
-                    {hasActiveFilters && (
+                    {hasActiveFilters() && (
                         <div className="flex items-end">
                             <button
                                 onClick={handleClearFilters}
@@ -1270,54 +1459,37 @@ export default function AttendanceList() {
                 </div>
             )}
 
-            {/* Modal de Detalle de Motivo */}
+            {/* Modal de Motivo */}
             {reasonModal && (
                 <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
                     <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-gray-100 transform scale-100 transition-all">
                         <div className="p-6">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900">
-                                    Detalle de Justificación
-                                </h3>
-                                <button
-                                    onClick={() => setReasonModal(null)}
-                                    className="text-gray-400 hover:text-gray-500"
-                                >
+                                <h3 className="text-lg font-semibold text-gray-900">Detalle de Justificación</h3>
+                                <button onClick={() => setReasonModal(null)} className="text-gray-400 hover:text-gray-500">
                                     <X className="h-5 w-5" />
                                 </button>
                             </div>
-                            
                             <p className="text-sm text-gray-600 mb-4">
                                 Empleado: <span className="font-semibold">{reasonModal.employee}</span>
                             </p>
-
                             <div className="mb-4">
                                 <h4 className="text-sm font-medium text-gray-700 mb-2">Motivo / Notas:</h4>
                                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm text-gray-800">
                                     {reasonModal.notes || 'Sin notas adicionales'}
                                 </div>
                             </div>
-
                             {reasonModal.evidence && (
                                 <div className="mb-6">
                                     <h4 className="text-sm font-medium text-gray-700 mb-2">Evidencia Adjunta:</h4>
-                                    <a 
-                                        href={reasonModal.evidence}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-2 p-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
-                                    >
+                                    <a href={reasonModal.evidence} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors">
                                         <CheckCircle className="h-5 w-5" />
                                         <span className="font-medium">Ver Archivo de Evidencia</span>
                                     </a>
                                 </div>
                             )}
-
                             <div className="flex justify-end">
-                                <button
-                                    onClick={() => setReasonModal(null)}
-                                    className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors"
-                                >
+                                <button onClick={() => setReasonModal(null)} className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors">
                                     Cerrar
                                 </button>
                             </div>
@@ -1351,10 +1523,7 @@ export default function AttendanceList() {
                             </div>
                             <div className="flex gap-3">
                                 <button
-                                    onClick={() => {
-                                        setValidationModal(null)
-                                        setValidationNotes('')
-                                    }}
+                                    onClick={() => { setValidationModal(null); setValidationNotes(''); }}
                                     className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                                     disabled={validating}
                                 >
@@ -1363,10 +1532,7 @@ export default function AttendanceList() {
                                 <button
                                     onClick={handleValidate}
                                     disabled={validating || (!validationModal.approved && !validationNotes)}
-                                    className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors ${validationModal.approved
-                                        ? 'bg-green-600 hover:bg-green-700'
-                                        : 'bg-red-600 hover:bg-red-700'
-                                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                    className={`flex-1 px-4 py-2 text-white rounded-lg transition-colors ${validationModal.approved ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
                                     {validating ? 'Procesando...' : 'Confirmar'}
                                 </button>
@@ -1387,10 +1553,7 @@ export default function AttendanceList() {
                                     {selectedLocation.employee} • {formatDate(selectedLocation.date)} {formatTime(selectedLocation.time)}
                                 </p>
                             </div>
-                            <button
-                                onClick={() => setSelectedLocation(null)}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
+                            <button onClick={() => setSelectedLocation(null)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
                                 <X className="h-5 w-5 text-gray-500" />
                             </button>
                         </div>
@@ -1399,33 +1562,17 @@ export default function AttendanceList() {
                                 <p className="text-sm text-gray-600">
                                     <span className="font-semibold">Coordenadas:</span> {selectedLocation.lat.toFixed(6)}, {selectedLocation.lng.toFixed(6)}
                                 </p>
-                                <a
-                                    href={`https://www.google.com/maps?q=${selectedLocation.lat},${selectedLocation.lng}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sm text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center"
-                                >
+                                <a href={`https://www.google.com/maps?q=${selectedLocation.lat},${selectedLocation.lng}`} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center">
                                     <MapPin className="h-4 w-4 mr-1" />
                                     Abrir en Google Maps
                                 </a>
                             </div>
                             <div className="w-full h-96 rounded-lg overflow-hidden border border-gray-200">
-                                <iframe
-                                    width="100%"
-                                    height="100%"
-                                    frameBorder="0"
-                                    style={{ border: 0 }}
-                                    src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&q=${selectedLocation.lat},${selectedLocation.lng}&zoom=16`}
-                                    allowFullScreen
-                                    title="Mapa de ubicación"
-                                />
+                                <iframe width="100%" height="100%" frameBorder="0" style={{ border: 0 }} src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyBFw0Qbyq9zTFTd-tUY6dZWTgaQzuU17R8&q=${selectedLocation.lat},${selectedLocation.lng}&zoom=16`} allowFullScreen title="Mapa de ubicación" />
                             </div>
                         </div>
                         <div className="p-4 border-t border-gray-200 flex justify-end">
-                            <button
-                                onClick={() => setSelectedLocation(null)}
-                                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                            >
+                            <button onClick={() => setSelectedLocation(null)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
                                 Cerrar
                             </button>
                         </div>
@@ -1448,59 +1595,27 @@ export default function AttendanceList() {
                     {!importResult ? (
                         <>
                             <div className="flex justify-between items-center">
-                                <p className="text-sm text-slate-500">
-                                    Carga un archivo Excel con las asistencias.
-                                </p>
-                                <button 
-                                    onClick={handleDownloadTemplate}
-                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
-                                >
-                                    Descargar Plantilla
-                                </button>
+                                <p className="text-sm text-slate-500">Carga un archivo Excel con las asistencias.</p>
+                                <button onClick={handleDownloadTemplate} className="text-xs text-blue-600 hover:text-blue-800 font-medium underline">Descargar Plantilla</button>
                             </div>
-
-                            {/* Zona de Carga */}
-                            <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
-                                importFile ? 'border-blue-200 bg-blue-50/30' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'
-                            }`}>
+                            <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${importFile ? 'border-blue-200 bg-blue-50/30' : 'border-slate-300 hover:border-blue-400 hover:bg-slate-50'}`}>
                                 {!importFile ? (
-                                    <div 
-                                        onClick={() => fileInputRef.current.click()}
-                                        className="cursor-pointer flex flex-col items-center gap-3"
-                                    >
+                                    <div onClick={() => fileInputRef.current.click()} className="cursor-pointer flex flex-col items-center gap-3">
                                         <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
                                             <Upload size={24} />
                                         </div>
                                         <h3 className="text-sm font-semibold text-slate-700">Clic para subir Excel</h3>
-                                        <p className="text-xs text-slate-400">
-                                            Soporta .xlsx, .xls
-                                        </p>
+                                        <p className="text-xs text-slate-400">Soporta .xlsx, .xls</p>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center gap-2">
                                         <FileSpreadsheet size={32} className="text-green-600" />
                                         <h3 className="text-sm font-bold text-slate-800">{importFile.name}</h3>
-                                        <button 
-                                            onClick={() => {
-                                                setImportFile(null)
-                                                setImportPreview([])
-                                            }}
-                                            className="text-xs text-red-500 hover:text-red-700 font-medium mt-1"
-                                        >
-                                            Cambiar archivo
-                                        </button>
+                                        <button onClick={() => { setImportFile(null); setImportPreview([]); }} className="text-xs text-red-500 hover:text-red-700 font-medium mt-1">Cambiar archivo</button>
                                     </div>
                                 )}
-                                <input 
-                                    type="file" 
-                                    ref={fileInputRef} 
-                                    className="hidden" 
-                                    accept=".xlsx, .xls" 
-                                    onChange={handleFileChange} 
-                                />
+                                <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleFileChange} />
                             </div>
-
-                            {/* Vista Previa */}
                             {importPreview.length > 0 && (
                                 <div className="space-y-2">
                                     <h4 className="text-sm font-bold text-slate-700">Vista Previa ({importPreview.length} registros)</h4>
@@ -1521,18 +1636,13 @@ export default function AttendanceList() {
                                                         <td className="px-3 py-2">{row.date}</td>
                                                         <td className="px-3 py-2">{row.checkIn || '-'}</td>
                                                         <td className="px-3 py-2">
-                                                            {row.isValid 
-                                                                ? <CheckCircle size={14} className="text-green-500" /> 
-                                                                : <XCircle size={14} className="text-red-500" />
-                                                            }
+                                                            {row.isValid ? <CheckCircle size={14} className="text-green-500" /> : <XCircle size={14} className="text-red-500" />}
                                                         </td>
                                                     </tr>
                                                 ))}
                                                 {importPreview.length > 100 && (
                                                     <tr>
-                                                        <td colSpan="5" className="px-3 py-2 text-center text-slate-400 italic">
-                                                            ... y {importPreview.length - 100} más ...
-                                                        </td>
+                                                        <td colSpan="5" className="px-3 py-2 text-center text-slate-400 italic">... y {importPreview.length - 100} más ...</td>
                                                     </tr>
                                                 )}
                                             </tbody>
@@ -1544,33 +1654,19 @@ export default function AttendanceList() {
                     ) : (
                         <div className={`p-6 rounded-lg ${importResult.success && !importResult.error_count ? 'bg-green-50 border border-green-200' : 'bg-orange-50 border border-orange-200'}`}>
                             <div className="text-center">
-                                {importResult.success && !importResult.error_count ? (
-                                    <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                                ) : (
-                                    <AlertCircle className="w-12 h-12 text-orange-500 mx-auto mb-3" />
-                                )}
+                                {importResult.success && !importResult.error_count ? <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" /> : <AlertCircle className="w-12 h-12 text-orange-500 mx-auto mb-3" />}
                                 <h3 className={`text-lg font-bold mb-1 ${importResult.success && !importResult.error_count ? 'text-green-800' : 'text-orange-800'}`}>
                                     {importResult.success && !importResult.error_count ? '¡Importación Exitosa!' : 'Resultado de la Importación'}
                                 </h3>
-                                <p className={`text-sm ${importResult.success && !importResult.error_count ? 'text-green-600' : 'text-orange-700'}`}>
-                                    {importResult.message}
-                                </p>
-                                {importResult.success && (
-                                    <p className="text-xs text-green-700 mt-2">
-                                        Se procesaron {importResult.count} registros correctamente.
-                                    </p>
-                                )}
+                                <p className={`text-sm ${importResult.success && !importResult.error_count ? 'text-green-600' : 'text-orange-700'}`}>{importResult.message}</p>
+                                {importResult.success && <p className="text-xs text-green-700 mt-2">Se procesaron {importResult.count} registros correctamente.</p>}
                             </div>
-
-                            {/* Lista de Errores */}
                             {importResult.errors && importResult.errors.length > 0 && (
                                 <div className="mt-4 text-left">
                                     <h4 className="text-xs font-bold text-orange-800 uppercase mb-2">Detalle de Errores:</h4>
                                     <div className="bg-white border border-orange-200 rounded p-3 max-h-40 overflow-y-auto">
                                         <ul className="list-disc list-inside text-xs text-red-600 space-y-1">
-                                            {importResult.errors.map((err, idx) => (
-                                                <li key={idx}>{err}</li>
-                                            ))}
+                                            {importResult.errors.map((err, idx) => <li key={idx}>{err}</li>)}
                                         </ul>
                                     </div>
                                 </div>

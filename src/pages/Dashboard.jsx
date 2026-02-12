@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { getRecentActivity, subscribeToActivity } from '../services/activity'
 import { getDashboardStats } from '../services/dashboard'
+import MonthlyReportModal from '../components/MonthlyReportModal'
 import { 
   Users, 
   Clock, 
@@ -24,6 +25,7 @@ export default function Dashboard() {
   const [loadingActivities, setLoadingActivities] = useState(true)
   const [statsData, setStatsData] = useState(null)
   const [loadingStats, setLoadingStats] = useState(true)
+  const [isMonthlyReportOpen, setIsMonthlyReportOpen] = useState(false)
 
   // Cargar actividades iniciales y suscribirse a cambios
   useEffect(() => {
@@ -212,7 +214,7 @@ export default function Dashboard() {
       label: 'Reporte Mensual', 
       icon: TrendingUp, 
       color: 'bg-emerald-600',
-      action: () => console.log('Ir a reportes') // Pendiente
+      action: () => setIsMonthlyReportOpen(true)
     },
     { 
       label: 'Ver Calendario', 
@@ -395,6 +397,11 @@ export default function Dashboard() {
         </div>
 
       </div>
+      
+      <MonthlyReportModal 
+        isOpen={isMonthlyReportOpen} 
+        onClose={() => setIsMonthlyReportOpen(false)} 
+      />
     </div>
   )
 }
