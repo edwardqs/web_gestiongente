@@ -59,7 +59,7 @@ function App() {
                 </ProtectedRoute>
               } />
 
-              {/* Rutas de Empleados - COMENTADO POR SOLICITUD DE USUARIO
+              {/* Rutas de Empleados */}
               <Route path="/register-employee" element={
                 <ProtectedRoute module="employees" requiredAction="write">
                   <RegisterEmployee />
@@ -77,7 +77,6 @@ function App() {
                   <EmployeesList />
                 </ProtectedRoute>
               } />
-              */}
 
               {/* Ruta para ver lista de asistencias */}
               <Route path="/attendance-list" element={

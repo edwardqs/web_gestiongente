@@ -349,139 +349,6 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     }, [])
   }, [menuItems, user])
 
-  // Componente MenuItem recursivo OPTIMIZADO
-  const MenuItem = ({ item, level = 0, parentId = null }) => {
-    const hasSubmenu = item.submenu && item.submenu.length > 0
-    const levelKey = `level${level}`
-    const isExpanded = expandedMenus[levelKey] === item.id
-    const Icon = item.icon
-
-    // Verificar si está activo
-    const isActive = useMemo(() => {
-      if (hasSubmenu || !item.href || item.href === '#') return false
-      
-      const [targetPath, targetQuery] = item.href.split('?')
-      const currentPath = location.pathname
-      
-      const isPathMatch = currentPath === targetPath || 
-                         (targetPath !== '/' && currentPath.startsWith(targetPath))
-      
-      if (targetQuery && isPathMatch) {
-        return location.search.includes(targetQuery)
-      }
-      
-      return isPathMatch
-    }, [hasSubmenu, item.href, location.pathname, location.search])
-
-    // Estilos dinámicos
-    const paddingLeft = level === 0 ? 'px-3' : level === 1 ? 'pl-6 pr-3' : 'pl-10 pr-3'
-    const fontSize = level === 0 ? 'text-[15px]' : level === 1 ? 'text-[14px]' : 'text-[13px]'
-
-    const handleClick = (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      
-      if (hasSubmenu) {
-        toggleMenu(item.id, level)
-      } else {
-        handleNavigation(item.href)
-      }
-    }
-
-    return (
-      <div className="w-full mb-1">
-        <button
-          onClick={handleClick}
-          className={`
-            w-full flex items-center gap-3 py-2.5 rounded-xl transition-all duration-200 group relative
-            ${paddingLeft}
-            ${isCollapsed && level === 0 ? 'justify-center px-0' : ''}
-            
-            ${isActive 
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50' 
-              : hasSubmenu && isExpanded 
-                ? 'bg-blue-50/80 text-blue-700 font-semibold' 
-                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-            }
-            
-            active:scale-[0.98]
-            ${!hasSubmenu && !isActive ? 'hover:translate-x-1' : ''}
-          `}
-          title={isCollapsed ? item.label : ''}
-        >
-          {/* Indicador visual para items activos en subniveles */}
-          {level > 0 && isActive && (
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-blue-400" />
-          )}
-
-          {/* Icono */}
-          {Icon && (
-            <Icon
-              size={level === 0 ? 22 : 18}
-              className={`
-                ${level === 0 ? 'min-w-[22px]' : 'min-w-[18px]'} 
-                transition-colors
-                ${isActive 
-                  ? 'text-white' 
-                  : isExpanded 
-                    ? 'text-blue-600' 
-                    : 'text-gray-400 group-hover:text-gray-600'
-                }
-              `}
-              strokeWidth={isActive ? 2.5 : 2}
-            />
-          )}
-
-          {!Icon && level > 0 && (
-            <div className={`
-              w-1.5 h-1.5 rounded-full mr-1 transition-colors
-              ${isActive ? 'bg-white' : 'bg-gray-300 group-hover:bg-gray-400'}
-            `} />
-          )}
-
-          {/* Label y Chevron */}
-          {!isCollapsed && (
-            <>
-              <span className={`
-                whitespace-nowrap flex-1 text-left ${fontSize} 
-                ${isActive ? 'font-medium' : ''}
-                ${isMobile && level > 1 ? 'truncate max-w-[150px]' : ''}
-              `}>
-                {item.label}
-              </span>
-              {hasSubmenu && (
-                <ChevronDown 
-                  size={16}
-                  className={`
-                    transition-transform duration-200 shrink-0
-                    ${isExpanded ? 'rotate-180 text-blue-600' : 'text-gray-400'}
-                  `}
-                />
-              )}
-            </>
-          )}
-        </button>
-
-        {/* Submenú recursivo */}
-        {!isCollapsed && hasSubmenu && (
-          <div className={`
-            overflow-hidden transition-all duration-300 ease-in-out space-y-1 mt-1
-            ${isExpanded ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'}
-          `}>
-            {item.submenu.map((subItem) => (
-              <MenuItem 
-                key={subItem.id} 
-                item={subItem} 
-                level={level + 1}
-                parentId={item.id}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <>
       {/* Overlay para móvil */}
@@ -567,7 +434,17 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
           {/* Menú de Navegación */}
           <nav className="flex-1 px-4 py-4 space-y-1">
             {visibleMenuItems.map((item) => (
-              <MenuItem key={item.id} item={item} level={0} />
+              <MenuItem 
+                key={item.id} 
+                item={item} 
+                level={0}
+                expandedMenus={expandedMenus}
+                toggleMenu={toggleMenu}
+                handleNavigation={handleNavigation}
+                isCollapsed={isCollapsed}
+                location={location}
+                isMobile={isMobile}
+              />
             ))}
           </nav>
 
@@ -586,5 +463,168 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         </div>
       </aside>
     </>
+  )
+}
+
+// Componente MenuItem extraído para evitar re-renderizados innecesarios
+const MenuItem = ({ item, level = 0, parentId = null, expandedMenus, toggleMenu, handleNavigation, isCollapsed, location, isMobile }) => {
+  const hasSubmenu = item.submenu && item.submenu.length > 0
+  const levelKey = `level${level}`
+  const isExpanded = expandedMenus[levelKey] === item.id
+  const Icon = item.icon
+
+  // Verificar si está activo
+  const isActive = useMemo(() => {
+    if (hasSubmenu || !item.href || item.href === '#') return false
+    
+    const [targetPath, targetQuery] = item.href.split('?')
+    const currentPath = location.pathname
+    
+    const isPathMatch = currentPath === targetPath || 
+                       (targetPath !== '/' && currentPath.startsWith(targetPath))
+    
+    if (targetQuery && isPathMatch) {
+      return location.search.includes(targetQuery)
+    }
+    
+    return isPathMatch
+  }, [hasSubmenu, item.href, location.pathname, location.search])
+
+  // Estilos dinámicos
+  const paddingLeft = level === 0 ? 'px-3' : level === 1 ? 'pl-6 pr-3' : 'pl-10 pr-3'
+  const fontSize = level === 0 ? 'text-[15px]' : level === 1 ? 'text-[14px]' : 'text-[13px]'
+
+  const commonClasses = `
+    w-full flex items-center gap-3 py-2.5 rounded-xl transition-all duration-200 group relative
+    ${paddingLeft}
+    ${isCollapsed && level === 0 ? 'justify-center px-0' : ''}
+    
+    ${isActive 
+      ? 'bg-blue-600 text-white shadow-md shadow-blue-200/50' 
+      : hasSubmenu && isExpanded 
+        ? 'bg-blue-50/80 text-blue-700 font-semibold' 
+        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+    }
+    
+    active:scale-[0.98]
+    ${!hasSubmenu && !isActive ? 'hover:translate-x-1' : ''}
+  `
+
+  const renderContent = () => (
+    <>
+      {/* Indicador visual para items activos en subniveles */}
+      {level > 0 && isActive && (
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-blue-400" />
+      )}
+
+      {/* Icono */}
+      {Icon && (
+        <Icon
+          size={level === 0 ? 22 : 18}
+          className={`
+            ${level === 0 ? 'min-w-[22px]' : 'min-w-[18px]'} 
+            transition-colors
+            ${isActive 
+              ? 'text-white' 
+              : isExpanded 
+                ? 'text-blue-600' 
+                : 'text-gray-400 group-hover:text-gray-600'
+            }
+          `}
+          strokeWidth={isActive ? 2.5 : 2}
+        />
+      )}
+
+      {!Icon && level > 0 && (
+        <div className={`
+          w-1.5 h-1.5 rounded-full mr-1 transition-colors
+          ${isActive ? 'bg-white' : 'bg-gray-300 group-hover:bg-gray-400'}
+        `} />
+      )}
+
+      {/* Label y Chevron */}
+      {!isCollapsed && (
+        <>
+          <span className={`
+            whitespace-nowrap flex-1 text-left ${fontSize} 
+            ${isActive ? 'font-medium' : ''}
+            ${isMobile && level > 1 ? 'truncate max-w-[150px]' : ''}
+          `}>
+            {item.label}
+          </span>
+          {hasSubmenu && (
+            <ChevronDown 
+              size={16}
+              className={`
+                transition-transform duration-200 shrink-0
+                ${isExpanded ? 'rotate-180 text-blue-600' : 'text-gray-400'}
+              `}
+            />
+          )}
+        </>
+      )}
+    </>
+  )
+
+  const handleClick = (e) => {
+    e.stopPropagation()
+    if (hasSubmenu) {
+      e.preventDefault()
+      toggleMenu(item.id, level)
+    }
+  }
+
+  return (
+    <div className="w-full mb-1">
+      {hasSubmenu ? (
+        <button
+          onClick={handleClick}
+          className={commonClasses}
+          title={isCollapsed ? item.label : ''}
+        >
+          {renderContent()}
+        </button>
+      ) : (
+        <Link
+          to={item.href}
+          onClick={(e) => {
+             e.stopPropagation()
+             if (isMobile) {
+                // Let handleNavigation handle the delay and closing
+                e.preventDefault()
+                handleNavigation(item.href)
+             }
+             // On desktop, Link handles navigation naturally
+          }}
+          className={commonClasses}
+          title={isCollapsed ? item.label : ''}
+        >
+           {renderContent()}
+        </Link>
+      )}
+
+      {/* Submenú recursivo */}
+      {!isCollapsed && hasSubmenu && (
+        <div className={`
+          overflow-hidden transition-all duration-300 ease-in-out space-y-1 mt-1
+          ${isExpanded ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'}
+        `}>
+          {item.submenu.map((subItem) => (
+            <MenuItem 
+              key={subItem.id} 
+              item={subItem} 
+              level={level + 1}
+              parentId={item.id}
+              expandedMenus={expandedMenus}
+              toggleMenu={toggleMenu}
+              handleNavigation={handleNavigation}
+              isCollapsed={isCollapsed}
+              location={location}
+              isMobile={isMobile}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
