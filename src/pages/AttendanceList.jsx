@@ -745,8 +745,9 @@ export default function AttendanceList() {
             const formattedData = exportData.map(item => {
                 const getStatusText = (i) => {
                     const t = i.record_type;
+                    if (i.status === 'FALTA_INJUSTIFICADA') return 'AUSENCIA';
                     if (t === 'ASISTENCIA') return i.is_late ? 'TARDANZA' : 'PUNTUAL';
-                    if (t === 'FALTA JUSTIFICADA' || t === 'AUSENCIA SIN JUSTIFICAR') return 'AUSENCIA';
+                    if (t === 'FALTA JUSTIFICADA' || t === 'AUSENCIA SIN JUSTIFICAR' || t === 'AUSENCIA' || t === 'FALTA_INJUSTIFICADA') return 'AUSENCIA';
                     if (t === 'DESCANSO MÉDICO') return 'DESCANSO MÉDICO';
                     if (t === 'LICENCIA CON GOCE') return 'LICENCIA';
                     if (t === 'VACACIONES') return 'VACACIONES';
@@ -757,7 +758,7 @@ export default function AttendanceList() {
                     const t = i.record_type;
                     if (t === 'ASISTENCIA') return 'Asistencia';
                     if (t === 'FALTA JUSTIFICADA') return 'Justificada';
-                    if (t === 'AUSENCIA SIN JUSTIFICAR') return 'Injustificada';
+                    if (t === 'AUSENCIA SIN JUSTIFICAR' || t === 'AUSENCIA' || t === 'FALTA_INJUSTIFICADA') return 'Injustificada';
                     if (t === 'DESCANSO MÉDICO') return 'General';
                     if (t === 'LICENCIA CON GOCE') return 'Con Goce';
                     if (t === 'VACACIONES') return 'Vacaciones';
@@ -860,7 +861,7 @@ export default function AttendanceList() {
             } else {
                 badgeContent = <span title="PUNTUAL" className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 block truncate max-w-[100px] text-center">PUNTUAL</span>
             }
-        } else if (type === 'FALTA JUSTIFICADA' || type === 'AUSENCIA SIN JUSTIFICAR') {
+        } else if (type === 'FALTA JUSTIFICADA' || type === 'AUSENCIA SIN JUSTIFICAR' || type === 'AUSENCIA' || type === 'FALTA_INJUSTIFICADA') {
              badgeContent = <span title="AUSENCIA" className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 block truncate max-w-[100px] text-center">AUSENCIA</span>
         } else if (type === 'DESCANSO MÉDICO') {
             badgeContent = <span title="DESCANSO MÉDICO" className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 block truncate max-w-[100px] text-center">DESCANSO MÉDICO</span>
@@ -893,6 +894,8 @@ export default function AttendanceList() {
                 colorClass = 'bg-green-50 text-green-700';
                 break;
             case 'AUSENCIA SIN JUSTIFICAR':
+            case 'AUSENCIA':
+            case 'FALTA_INJUSTIFICADA':
                 label = 'Injustificada';
                 colorClass = 'bg-red-50 text-red-700';
                 break;
