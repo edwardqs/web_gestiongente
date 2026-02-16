@@ -18,7 +18,8 @@ import {
   Clock,
   RefreshCw,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  Send
 } from 'lucide-react'
 
 // --- FUNCIONES DE FORMATEO ---
@@ -377,6 +378,33 @@ export default function RequestsList() {
     }
   }
 
+  const handleSendPapeleta = async (request) => {
+    setProcessingId(request.id)
+    try {
+      showToast('Generando y enviando papeleta...', 'info')
+      const pdfUrl = await generateAndUploadPDF(request)
+      
+      const { error } = await supabase
+        .from('vacation_requests')
+        .update({ pdf_url: pdfUrl })
+        .eq('id', request.id)
+
+      if (error) throw error
+
+      // Actualizar estado local
+      setRequests(prev => prev.map(req => 
+        req.id === request.id ? { ...req, pdf_url: pdfUrl } : req
+      ))
+
+      showToast('Papeleta enviada al móvil correctamente', 'success')
+    } catch (error) {
+      console.error(error)
+      showToast('Error al enviar papeleta: ' + error.message, 'error')
+    } finally {
+      setProcessingId(null)
+    }
+  }
+
   const getStatusBadge = (status) => {
     switch (status?.toUpperCase()) {
       case 'APROBADO':
@@ -541,6 +569,16 @@ export default function RequestsList() {
                         >
                           <Printer size={16} />
                           <span className="hidden sm:inline">Papeleta</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleSendPapeleta(req)}
+                          disabled={processingId === req.id}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium shadow-sm"
+                          title="Enviar Papeleta al Móvil"
+                        >
+                          <Send size={16} />
+                          <span className="hidden sm:inline">Enviar</span>
                         </button>
                       </div>
                     </td>
