@@ -1,4 +1,4 @@
-﻿﻿import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
@@ -136,7 +136,22 @@ export default function RegisterEmployee() {
             }
             // Cargar departamentos
             getDepartmentsByLocation(selectedLoc.id).then(({ data }) => {
-                if (data) setDepartmentsList(data)
+                if (data) {
+                    setDepartmentsList(data)
+
+                    // Auto-asignar "OPL" por defecto si existe y es la única opción
+                    if (!formData.business_unit) {
+                        const oplDept = data.find(d => d.name === 'OPL')
+                        // Solo auto-asignar si OPL existe Y es la única opción disponible
+                        if (oplDept && data.length === 1) {
+                             setFormData(prev => ({
+                                ...prev,
+                                business_unit: 'OPL',
+                                department_id: oplDept.id
+                            }))
+                        }
+                    }
+                }
             })
         }
     } else {
