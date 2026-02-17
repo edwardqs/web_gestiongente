@@ -35,6 +35,9 @@ const CalendarRequests = () => {
           // --- FILTRADO DE SEGURIDAD POR SEDE/UNIDAD ---
           const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
           
+          // Filtrar canceladas o rechazadas (Nuevo requerimiento)
+          filteredData = filteredData.filter(req => req.status !== 'CANCELADO' && req.status !== 'RECHAZADO')
+
           if (!isGlobalAdmin) {
               if (user?.sede) {
                   filteredData = filteredData.filter(req => req.employees?.sede === user.sede)

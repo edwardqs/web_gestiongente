@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getRequests } from '../services/requests'
 import { useAuth } from '../context/AuthContext'
@@ -17,6 +17,7 @@ import {
   RefreshCw,
   ThumbsUp,
   ThumbsDown,
+  Upload,
 } from 'lucide-react'
 
 // --- DATOS DEL EMPLEADOR (centralizados) ---
@@ -372,17 +373,25 @@ export default function RequestsList() {
                           <>
                             <button
                               onClick={() => openStatusModal(req.id, 'APROBADO')}
-                              disabled={processingId === req.id}
-                              className="p-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50"
-                              title="Aprobar"
+                              disabled={processingId === req.id || !req.signed_file_url}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                !req.signed_file_url 
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50' 
+                                  : 'bg-green-50 text-green-600 hover:bg-green-100'
+                              }`}
+                              title={!req.signed_file_url ? "Pendiente de firma del empleado" : "Aprobar"}
                             >
                               <ThumbsUp size={16} />
                             </button>
                             <button
                               onClick={() => openStatusModal(req.id, 'RECHAZADO')}
-                              disabled={processingId === req.id}
-                              className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
-                              title="Rechazar"
+                              disabled={processingId === req.id || !req.signed_file_url}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                !req.signed_file_url 
+                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50' 
+                                  : 'bg-red-50 text-red-600 hover:bg-red-100'
+                              }`}
+                              title={!req.signed_file_url ? "Pendiente de firma del empleado" : "Rechazar"}
                             >
                               <ThumbsDown size={16} />
                             </button>
@@ -392,11 +401,25 @@ export default function RequestsList() {
                         <button
                           onClick={() => navigate(`/papeleta/${req.id}`)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-blue-300 hover:text-blue-600 transition-all text-sm font-medium shadow-sm"
-                          title="Ver Papeleta"
+                          title="Ver Papeleta Generada"
                         >
                           <Printer size={16} />
                           <span className="hidden sm:inline">Papeleta</span>
                         </button>
+
+                        {/* Botón para Ver Firmado (Solo si existe URL) */}
+                        {req.signed_file_url && (
+                          <a
+                            href={req.signed_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-all text-sm font-medium shadow-sm"
+                            title="Ver Documento Firmado"
+                          >
+                            <FileText size={16} />
+                            <span className="hidden sm:inline">Ver Firmado</span>
+                          </a>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -406,7 +429,7 @@ export default function RequestsList() {
           </table>
         </div>
       </div>
-
+      
       <Modal
         isOpen={modalConfig.isOpen}
         onClose={() => setModalConfig((prev) => ({ ...prev, isOpen: false }))}
