@@ -63,7 +63,7 @@ export const PapeletaTemplate = ({ data, copyType }) => {
                </div>
             </div>
             <div className="flex items-center gap-2">
-               <div className="text-[8px] font-bold text-blue-600 text-right leading-tight" style={{ color: '#2563eb' }}>FECHA DE<br/>RETORNO</div>
+               <div className="text-[8px] font-bold text-blue-600 text-right leading-tight" style={{ color: '#2563eb' }}>FECHA DE<br/>TÉRMINO</div>
                <div className="border-[2px] border-black px-3 py-1 text-lg font-black bg-white" style={{ backgroundColor: 'white' }}>
                  {dates.formattedEnd}
                </div>

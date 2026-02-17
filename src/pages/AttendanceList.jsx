@@ -412,11 +412,28 @@ export default function AttendanceList() {
                             profile_picture_url
                         )
                     `, { count: 'exact' })
+
+                // 1. Aplicar filtros de FECHA (usando variables locales con defaults)
+                query = query.gte('work_date', filters.dateFrom)
+                             .lte('work_date', filters.dateTo)
+
+                // 2. Aplicar filtros de ESTADO manualmente (para asegurar orden correcto)
+                if (filters.status === 'on_time') {
+                    query = query.eq('record_type', 'ASISTENCIA').eq('is_late', false)
+                } else if (filters.status === 'late') {
+                    query = query.eq('record_type', 'ASISTENCIA').eq('is_late', true)
+                } else if (filters.status === 'medical') {
+                    query = query.eq('record_type', 'DESCANSO MÉDICO')
+                } else if (filters.status === 'license') {
+                    query = query.eq('record_type', 'LICENCIA CON GOCE')
+                } else if (filters.status === 'vacation') {
+                    query = query.eq('record_type', 'VACACIONES')
+                }
+
+                // 3. Ordenar AL FINAL (después de los filtros)
+                query = query
                     .order('work_date', { ascending: false })
                     .order('check_in', { ascending: true })
-
-                // Aplicar filtros (fecha y estado) usando la función corregida
-                query = applyFilters(query, filters)
 
                 // Aplicar restricciones de paginación/límite
                 if (isGlobalAdmin) {
