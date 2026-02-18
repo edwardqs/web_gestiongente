@@ -30,10 +30,24 @@ export default function ReportsCenter() {
     const [selectedSede, setSelectedSede] = useState(user?.sede || 'all')
     const [selectedBusinessUnit, setSelectedBusinessUnit] = useState(user?.business_unit || 'all')
     
+    // Helper robusto para fecha Perú UTC-5 (independiente del navegador)
+    const getPeruDate = () => {
+        const now = new Date();
+        // Obtener UTC en milisegundos
+        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        // Offset Perú es -5 horas (independientemente del horario de verano que no tiene)
+        const peruTime = new Date(utc + (3600000 * -5));
+        
+        const year = peruTime.getFullYear();
+        const month = String(peruTime.getMonth() + 1).padStart(2, '0');
+        const day = String(peruTime.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     // Filtros Específicos
     const [dateRange, setDateRange] = useState({
-        start: new Date().toISOString().split('T')[0],
-        end: new Date().toISOString().split('T')[0]
+        start: getPeruDate(),
+        end: getPeruDate()
     })
     const [selectedMonth, setSelectedMonth] = useState({
         year: new Date().getFullYear(),
@@ -86,21 +100,36 @@ export default function ReportsCenter() {
                         'CCI': emp.cci_account,
                         'Estado': emp.is_active ? 'ACTIVO' : 'INACTIVO'
                     }))
-                    fileName = `Maestro_Empleados_${sedeSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`
+                    fileName = `Maestro_Empleados_${sedeSuffix}_${getPeruDate()}.xlsx`
                     sheetName = 'Empleados'
                     break
 
                 case 'attendance':
-                    // 1. Obtener datos de asistencia existentes
-                    const { data: attData, error: attError } = await getAttendanceReport(
-                        dateRange.start,
-                        dateRange.end,
+                    // 1. ESTRATEGIA ROBUSTA ANT-ZONA HORARIA
+                    // Ampliamos el rango de búsqueda (-1 día al inicio, +1 día al final)
+                    const qStart = new Date(dateRange.start);
+                    qStart.setDate(qStart.getDate() - 1);
+                    const queryStartStr = qStart.toISOString().split('T')[0];
+                    
+                    const qEnd = new Date(dateRange.end);
+                    qEnd.setDate(qEnd.getDate() + 1);
+                    const queryEndStr = qEnd.toISOString().split('T')[0];
+
+                    // Obtener datos con rango ampliado
+                    const { data: rawAttData, error: attError } = await getAttendanceReport(
+                        queryStartStr,
+                        queryEndStr,
                         selectedSede === 'all' ? null : selectedSede
                     )
 
-                    if (attError || !attData) {
+                    if (attError || !rawAttData) {
                         throw new Error('No se pudieron cargar los datos de asistencia')
                     }
+
+                    // FILTRADO EXACTO EN MEMORIA (String vs String)
+                    const attData = rawAttData.filter(item => {
+                        return item.work_date >= dateRange.start && item.work_date <= dateRange.end;
+                    });
 
                     // 2. Obtener lista de empleados para el cruce (Roster)
                     const { data: allEmployees, error: empError2 } = await getEmployeesReport(
@@ -112,17 +141,21 @@ export default function ReportsCenter() {
                         throw new Error('No se pudo cargar la lista de empleados para el reporte')
                     }
 
-                    // 3. Generar rango de fechas
+                    // 3. Generar rango de fechas (Iteración segura usando UTC)
                     const dates = []
-                    let currentDate = new Date(dateRange.start)
-                    const endDate = new Date(dateRange.end)
-                    // Ajuste de zona horaria para iteración segura
-                    currentDate.setHours(0,0,0,0)
-                    endDate.setHours(0,0,0,0)
+                    // Parseamos como UTC explícitamente agregando T00:00:00Z si es necesario, 
+                    // o mejor aún, trabajamos con los componentes de la fecha para evitar confusiones.
+                    
+                    const startParts = dateRange.start.split('-').map(Number); // [2026, 2, 17]
+                    const endParts = dateRange.end.split('-').map(Number);     // [2026, 2, 17]
+                    
+                    // Creamos fechas usando UTC para evitar que el navegador reste horas
+                    let currentIter = new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2]));
+                    const endIter = new Date(Date.UTC(endParts[0], endParts[1] - 1, endParts[2]));
 
-                    while (currentDate <= endDate) {
-                        dates.push(new Date(currentDate))
-                        currentDate.setDate(currentDate.getDate() + 1)
+                    while (currentIter <= endIter) {
+                        dates.push(new Date(currentIter))
+                        currentIter.setUTCDate(currentIter.getUTCDate() + 1)
                     }
 
                     // 4. Indexar asistencias existentes para búsqueda rápida: date_string -> employee_id -> record
@@ -187,7 +220,7 @@ export default function ReportsCenter() {
                             if (record) {
                                 // Caso: Registro existente
                                 data.push({
-                                    'Fecha': record.work_date,
+                                    'Fecha': record.work_date ? record.work_date.split('-').reverse().join('/') : '-', // DD/MM/YYYY
                                     'DNI': record.employees?.dni || emp.dni,
                                     'Empleado': record.employees?.full_name || emp.full_name,
                                     'Sede': record.employees?.sede || emp.sede,
@@ -201,7 +234,7 @@ export default function ReportsCenter() {
                             } else {
                                 // Caso: Ausencia implícita (No hay registro)
                                 data.push({
-                                    'Fecha': dateStr,
+                                    'Fecha': dateStr.split('-').reverse().join('/'), // DD/MM/YYYY
                                     'DNI': emp.dni,
                                     'Empleado': emp.full_name,
                                     'Sede': emp.sede,
@@ -269,7 +302,7 @@ export default function ReportsCenter() {
                             'Estado': v.status
                         }
                     })
-                    fileName = `Saldos_Vacaciones_${sedeSuffix}_${new Date().toISOString().split('T')[0]}.xlsx`
+                    fileName = `Saldos_Vacaciones_${sedeSuffix}_${getPeruDate()}.xlsx`
                     sheetName = 'Vacaciones'
                     break
             }

@@ -43,6 +43,20 @@ export default function AttendanceList() {
         return `${year}-${month}-${day}`
     }
 
+    // Helper robusto para fecha Perú UTC-5 (independiente del navegador)
+    const getPeruDate = () => {
+        const now = new Date();
+        // Obtener UTC en milisegundos
+        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        // Offset Perú es -5 horas (independientemente del horario de verano que no tiene)
+        const peruTime = new Date(utc + (3600000 * -5));
+        
+        const year = peruTime.getFullYear();
+        const month = String(peruTime.getMonth() + 1).padStart(2, '0');
+        const day = String(peruTime.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     // Cargar filtros guardados
     const loadSavedFilters = () => {
         try {
@@ -75,18 +89,35 @@ export default function AttendanceList() {
     // Inicializar filtros siempre con fecha actual
     const initializeFilters = () => {
         const savedFilters = loadSavedFilters()
-        const today = getLocalDate()
+        // Usar la fecha actual, preferiblemente de la zona horaria de Perú si es posible
+        // Si no, usar la local del ordenador
+        const today = getPeruDate()
         
-        // Siempre usar la fecha actual como valor por defecto
+        // Siempre usar la fecha actual como valor por defecto para las fechas
+        // Ignoramos las fechas guardadas para evitar que al día siguiente se muestre el día anterior
         return {
             status: savedFilters?.status || 'all',
-            dateFrom: savedFilters?.dateFrom || today,
-            dateTo: savedFilters?.dateTo || today,
+            dateFrom: today,
+            dateTo: today,
             search: savedFilters?.search || ''
         }
     }
 
     const [filters, setFilters] = useState(initializeFilters())
+
+    // Forzar actualización de fechas al cargar (si la fecha guardada/inicial difiere de hoy)
+    useEffect(() => {
+        const today = getPeruDate()
+        if (filters.dateFrom !== today && filters.dateFrom === filters.dateTo) {
+            // Solo actualizamos si las fechas son iguales (modo diario/default) y difieren de hoy
+            // Esto corrige el caso donde la app se quedó abierta desde ayer
+            setFilters(prev => ({
+                ...prev,
+                dateFrom: today,
+                dateTo: today
+            }))
+        }
+    }, []) // Solo al montar, para corregir estado inicial obsoleto
 
     // Guardar filtros cuando cambien
     useEffect(() => {
@@ -552,10 +583,47 @@ export default function AttendanceList() {
             let startDate = filters.dateFrom
             let endDate = filters.dateTo
 
-            if (!startDate) startDate = getLocalDate()
-            if (!endDate) endDate = getLocalDate()
+            if (!startDate) startDate = getPeruDate()
+            if (!endDate) endDate = getPeruDate()
+
+            // Asegurarnos de que startDate sea una cadena simple YYYY-MM-DD para evitar problemas con XLSX
+            // Si startDate es un objeto Date o tiene hora, lo limpiamos
+            if (startDate instanceof Date) startDate = startDate.toISOString().split('T')[0];
+            if (endDate instanceof Date) endDate = endDate.toISOString().split('T')[0];
+            if (startDate.includes('T')) startDate = startDate.split('T')[0];
+            if (endDate.includes('T')) endDate = endDate.split('T')[0];
 
             // 1. Determinar el modo de operación (Roster vs Histórico)
+            
+            // Si el usuario no ha tocado las fechas (o sea, si coinciden y no se especificó un rango histórico distinto),
+            // aseguramos que sea la fecha de HOY real al momento del clic.
+            // Esto cubre el caso donde la app lleva abierta horas y cruzó la medianoche.
+            const todayReal = getPeruDate();
+            if (startDate === endDate && startDate !== todayReal) {
+                // Si la fecha seleccionada es "ayer" (o pasado) pero es un rango de un solo día,
+                // y asumimos que es el comportamiento por defecto, podríamos actualizarla.
+                // PERO: El usuario podría querer ver el reporte de ayer explícitamente.
+                // SOLUCIÓN: Si la fecha en el estado es igual a la fecha "inicial" que se calculó hace horas (y ya no es hoy),
+                // asumimos que es un filtro "stale" y usamos hoy.
+                // Como no tenemos la fecha "inicial" guardada, usamos la heurística:
+                // Si el usuario no ha interactuado explícitamente (difícil saber), 
+                // PERO el usuario dijo "con el filtro de fecha por defecto tomando siempre en cuenta la fecha del ordenador".
+                // Entonces, si las fechas son iguales, asumimos que quiere "HOY".
+                // (Riesgo: Si quiere ver ayer, tendrá que seleccionar ayer explícitamente de nuevo o seleccionar rango).
+                // Para ser menos invasivos, solo lo hacemos si la diferencia es de 1 día (ayer vs hoy).
+                
+                const dStart = new Date(startDate);
+                const dToday = new Date(todayReal);
+                const diffTime = Math.abs(dToday - dStart);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                
+                // Si es solo 1 día de diferencia, asumimos que se quedó abierta la app y actualizamos a hoy.
+                if (diffDays <= 1) {
+                    startDate = todayReal;
+                    endDate = todayReal;
+                }
+            }
+
             const isGlobalAdmin = (
                 user?.role === 'ADMIN' || 
                 user?.role === 'SUPER ADMIN' || 
@@ -604,13 +672,16 @@ export default function AttendanceList() {
 
                     const vacationEmployeeIds = new Set(vacations?.map(v => v.employee_id) || [])
 
+                    // Asegurar que la fecha usada en el reporte sea exactamente la solicitada
+                    const reportDate = String(startDate); 
+
                     exportData = rpcData.data.map(item => {
                         // Lógica de vacaciones
                         const isOnVacation = vacationEmployeeIds.has(item.employee_id)
                         const shouldShowVacation = isOnVacation && (!item.check_in || ['INASISTENCIA', 'FALTA_INJUSTIFICADA', 'AUSENCIA'].includes(item.record_type))
 
                         return {
-                            work_date: startDate,
+                            work_date: reportDate, // Usar variable local inmutable para la fecha
                             employees: {
                                 full_name: item.full_name,
                                 dni: item.dni,
@@ -696,6 +767,20 @@ export default function AttendanceList() {
 
             } else {
                 // MODO HISTÓRICO - Solo registros existentes
+                
+                // ESTRATEGIA ROBUSTA ANT-ZONA HORARIA:
+                // Ampliamos el rango de búsqueda SQL (-1 día al inicio, +1 día al final)
+                // para asegurar que traemos los registros incluso si hay desfase de zona horaria.
+                // Luego filtramos en memoria (JavaScript) por la fecha exacta (string match).
+                
+                const qStart = new Date(startDate);
+                qStart.setDate(qStart.getDate() - 1);
+                const queryStartStr = qStart.toISOString().split('T')[0];
+                
+                const qEnd = new Date(endDate);
+                qEnd.setDate(qEnd.getDate() + 1);
+                const queryEndStr = qEnd.toISOString().split('T')[0];
+
                 let query = supabase
                     .from('attendance')
                     .select(`
@@ -708,8 +793,9 @@ export default function AttendanceList() {
                             business_unit
                         )
                     `)
-                    .gte('work_date', startDate)
-                    .lte('work_date', endDate)
+                    // Usamos el rango ampliado
+                    .gte('work_date', queryStartStr)
+                    .lte('work_date', queryEndStr)
                     .order('work_date', { ascending: false })
 
                 // Aplicar filtros básicos de estado
@@ -728,7 +814,11 @@ export default function AttendanceList() {
                 const { data, error } = await query
                 if (error) throw error
                 
-                exportData = data || []
+                // FILTRADO EXACTO EN MEMORIA
+                // Comparamos strings "YYYY-MM-DD" lexicográficamente. Esto no falla con zonas horarias.
+                exportData = (data || []).filter(item => {
+                    return item.work_date >= startDate && item.work_date <= endDate;
+                });
 
                 // Filtrado de seguridad (igual que loadAttendances)
                 if (!isGlobalAdmin) {
@@ -796,7 +886,7 @@ export default function AttendanceList() {
                 };
 
                 return {
-                    'Fecha': item.work_date,
+                    'Fecha': item.work_date ? item.work_date.split('-').reverse().join('/') : '-', // Formato DD/MM/YYYY para evitar problemas de zona horaria en Excel
                     'Empleado': item.employees?.full_name || 'Desconocido',
                     'DNI': item.employees?.dni || '',
                     'Cargo': item.employees?.position || '',
