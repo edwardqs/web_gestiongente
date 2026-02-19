@@ -34,6 +34,7 @@ SECURITY DEFINER
 AS $$
 DECLARE
     v_user_role text;
+    v_user_position text;
     v_user_area_id bigint;
     v_user_business_unit text;
     v_is_admin boolean;
@@ -41,23 +42,44 @@ BEGIN
     -- 0. Contexto de Seguridad (Detectar quién llama a la función)
     SELECT 
         e.role, 
+        e.position,
         jp.area_id,
         e.business_unit
     INTO 
         v_user_role, 
+        v_user_position,
         v_user_area_id,
         v_user_business_unit
     FROM public.employees e
     LEFT JOIN public.job_positions jp ON e.position = jp.name
     WHERE e.email = auth.email();
 
-    -- Definir si es Admin Global
-    v_is_admin := (
-        v_user_role IN ('ADMIN', 'SUPER ADMIN', 'JEFE_RRHH', 'ANALISTA_RRHH', 'ANALISTA DE GENTE Y GESTION', 'GERENTE', 'JEFE DE GENTE Y GESTIÓN', 'GERENTE GENERAL') 
-        OR v_user_role ILIKE '%ADMIN%' 
-        OR v_user_role ILIKE '%GERENTE%'
-        OR v_user_role ILIKE '%JEFE DE GENTE%'
-    );
+    -- Normalización
+    v_user_role := UPPER(TRIM(COALESCE(v_user_role, '')));
+    v_user_position := UPPER(TRIM(COALESCE(v_user_position, '')));
+
+    -- LÓGICA DE ADMIN ESTRICTA Y JERÁRQUICA
+    
+    -- NIVEL 0: SUPER USUARIO DE SISTEMA
+    IF auth.email() = 'admin@pauser.com' THEN
+        v_is_admin := TRUE;
+
+    -- NIVEL 1: ADMINS GLOBALES REALES (Prioridad Máxima)
+    ELSIF v_user_role IN ('ADMIN', 'SUPER ADMIN', 'JEFE_RRHH', 'GERENTE GENERAL', 'SISTEMAS') THEN
+        v_is_admin := TRUE;
+        
+    -- NIVEL 1.1: CARGOS GLOBALES (Excepciones por Cargo)
+    ELSIF (v_user_position LIKE '%JEFE DE GENTE%' OR v_user_position LIKE '%ANALISTA DE GENTE%') THEN
+        v_is_admin := TRUE;
+
+    -- NIVEL 2: RESTRICCIÓN PARA JEFES ADMINISTRATIVOS
+    ELSIF (v_user_position LIKE '%ADMINISTRACI%' OR v_user_position LIKE '%FINANZAS%') THEN
+        v_is_admin := FALSE;
+        
+    -- NIVEL 3: OTROS ROLES (Fallback)
+    ELSE
+        v_is_admin := FALSE;
+    END IF;
 
     RETURN QUERY
     WITH vacation_calculations AS (

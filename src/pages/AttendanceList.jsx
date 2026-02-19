@@ -139,6 +139,11 @@ export default function AttendanceList() {
         const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
         const userPosition = normalize(user.position);
         
+        // Excepción: JEFE DE ADMINISTRACIÓN Y FINANZAS NO debe validar (solo lectura)
+        if (userPosition.includes('ADMINISTRACION') || userPosition.includes('FINANZAS')) {
+            return false;
+        }
+        
         const allowedPositions = [
             'ANALISTA DE GENTE Y GESTION',
             'JEFE DE AREA DE GENTE Y GESTION',
@@ -222,20 +227,22 @@ export default function AttendanceList() {
             setLoading(true)
             
             const offset = (page - 1) * PAGE_SIZE
-            const isGlobalAdmin = (
-                user?.role === 'ADMIN' || 
-                user?.role === 'SUPER ADMIN' || 
-                user?.role === 'JEFE_RRHH' || 
-                user?.position?.includes('JEFE DE GENTE') ||
-                user?.position?.includes('JEFE DE RRHH') ||
-                user?.position?.includes('GERENTE') ||
-                user?.position?.includes('GERENTE GENERAL') ||
-                (user?.permissions && user?.permissions['*'])
-            ) && !user?.position?.includes('ANALISTA');
-
             const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
             const userRole = normalize(user?.role);
             const userPosition = normalize(user?.position);
+
+            const isGlobalAdmin = (
+                userRole === 'ADMIN' || 
+                userRole === 'SUPER ADMIN' || 
+                userRole === 'JEFE_RRHH' || 
+                userPosition.includes('JEFE DE GENTE') ||
+                userPosition.includes('ANALISTA DE GENTE') ||
+                userPosition.includes('GERENTE GENERAL') ||
+                (user?.permissions && user?.permissions['*'])
+            ) && (
+                !userPosition.includes('ANALISTA') || 
+                userPosition.includes('ANALISTA DE GENTE')
+            );
             
             const isBoss = userRole.includes('JEFE') || 
                            userRole.includes('GERENTE') || 

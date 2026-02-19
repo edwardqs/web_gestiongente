@@ -60,19 +60,22 @@ export default function EmployeesList() {
   let currentSedeName = sedeMap[sede] || sede
   
   // Seguridad: Sobreescribir si el usuario tiene una sede asignada y NO es admin
-  const isGlobalAdmin = user?.role === 'ADMIN' || 
-                        user?.role === 'SUPER ADMIN' || 
-                        user?.role === 'JEFE_RRHH' || 
-                        user?.position?.includes('JEFE DE GENTE') || 
-                        user?.position?.includes('GERENTE') || 
-                        user?.position?.includes('GERENTE GENERAL') || 
-                        (user?.permissions && user?.permissions['*'])
-
-  // --- CORRECCIÓN: PERMITIR A JEFES/GERENTES VER OTRAS SEDES ---
-  // El filtro estricto solo aplica a usuarios rasos (que no son Jefes/Gerentes)
   const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
   const userRole = normalize(user?.role);
   const userPosition = normalize(user?.position);
+
+  const isGlobalAdmin = 
+      userRole === 'ADMIN' || 
+      userRole === 'SUPER ADMIN' || 
+      userRole === 'JEFE_RRHH' || 
+      userPosition.includes('JEFE DE GENTE') || 
+      userPosition.includes('ANALISTA DE GENTE') ||
+      userPosition.includes('GERENTE') || 
+      userPosition.includes('GERENTE GENERAL') || 
+      (user?.permissions && user?.permissions['*']);
+
+  // --- CORRECCIÓN: PERMITIR A JEFES/GERENTES VER OTRAS SEDES ---
+  // El filtro estricto solo aplica a usuarios rasos (que no son Jefes/Gerentes)
 
   const isBoss = userRole.includes('JEFE') || 
                  userRole.includes('GERENTE') || 

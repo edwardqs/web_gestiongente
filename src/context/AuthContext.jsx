@@ -78,6 +78,25 @@ export const AuthProvider = ({ children }) => {
 
     try {
       console.log('Buscando perfil para:', authUser.email);
+
+      // --- CASO ESPECIAL: SUPER ADMIN (admin@pauser.com) ---
+      if (authUser.email === 'admin@pauser.com') {
+          console.log('⚡ SUPER ADMIN SYSTEM DETECTADO');
+          const superAdminUser = {
+              ...authUser,
+              id: authUser.id, // ID de Auth
+              email: 'admin@pauser.com',
+              role: 'SUPER ADMIN',
+              position: 'SISTEMAS',
+              full_name: 'Super Administrador',
+              sede: null, // Sede null = Global
+              business_unit: null,
+              permissions: { '*': { read: true, write: true, delete: true } }
+          };
+          setUser(superAdminUser);
+          setLoading(false);
+          return;
+      }
       
       // INTENTO 1: Consulta Directa a tabla employees
       let employeeData = null;
