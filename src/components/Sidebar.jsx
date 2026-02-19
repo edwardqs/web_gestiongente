@@ -61,6 +61,23 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
     const isAnalyst = user?.role?.includes('ANALISTA') || user?.position?.includes('ANALISTA')
     
+    // Nueva lógica: Determinar si es un JEFE que NO es JEFE DE GENTE DE GESTIÓN
+    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+    const userRole = normalize(user?.role);
+    const userPosition = normalize(user?.position);
+    
+    const isBoss = userRole.includes('JEFE') || 
+                   userRole.includes('GERENTE') || 
+                   userPosition.includes('JEFE') || 
+                   userPosition.includes('GERENTE') ||
+                   userPosition.includes('COORDINADOR') ||
+                   userPosition.includes('SUPERVISOR');
+
+    // Excepción específica: JEFE DE GENTE DE GESTIÓN sí puede ver reportes
+    const isHRBoss = userPosition.includes('JEFE DE GENTE') || userPosition.includes('GENTE Y GESTION');
+    
+    const shouldHideReports = isBoss && !isHRBoss && !isGlobalAdmin;
+
     if (!isGlobalAdmin && user?.sede) {
         employeesLabel = 'Mi Equipo'
         // Normalizar sede para URL
@@ -105,13 +122,14 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: '/attendance-list', 
       module: 'attendance' 
     },
-    {
+    // Ocultar Reportes si corresponde
+    ...(!shouldHideReports ? [{
       id: 'reports',
       icon: FileText,
       label: 'Reportes',
       href: '/reports',
       module: 'dashboard'
-    },
+    }] : []),
     { 
       id: 'requests',
       icon: FileText, 

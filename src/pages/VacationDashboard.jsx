@@ -230,7 +230,8 @@ export default function VacationDashboard() {
             let filteredResult = data || []
             
             // Si el RPC no soporta el filtro, o para asegurar consistencia UI, filtramos en memoria
-            if (queryBusinessUnit) {
+            // CORRECCIÓN: Si es Jefe, NO filtrar por business unit localmente, ya que el RPC ya trajo lo correcto por Área
+            if (queryBusinessUnit && !isBoss) {
                 filteredResult = filteredResult.filter(emp => 
                     emp.business_unit === queryBusinessUnit
                 )
