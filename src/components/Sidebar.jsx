@@ -332,14 +332,30 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
       // Filtrado especial para departamentos
       if (item.module === 'departments' && !isAdmin && user?.sede) {
-        const newItem = { ...item }
-        if (newItem.submenu) {
-          newItem.submenu = newItem.submenu.filter(sub => 
-            sub.label.toUpperCase() === user.sede.toUpperCase()
-          )
-        }
-        if (!newItem.submenu || newItem.submenu.length > 0) {
-          acc.push(newItem)
+        // --- MODIFICACIÓN IMPORTANTE: PERMITIR VER TODAS LAS SEDES A JEFES/GERENTES ---
+        // Si el usuario es Jefe o Gerente (aunque tenga sede asignada como ADM. CENTRAL),
+        // debe poder ver TODAS las sedes para gestionar su personal en esas ubicaciones.
+        // Solo aplicamos el filtro estricto si NO es un rol de jefatura.
+        
+        const isBoss = user?.role?.includes('JEFE') || 
+                       user?.role?.includes('GERENTE') || 
+                       user?.position?.includes('JEFE') || 
+                       user?.position?.includes('GERENTE') ||
+                       user?.position?.includes('COORDINADOR'); // Coordinadores también suelen ser regionales
+
+        if (!isBoss) {
+            const newItem = { ...item }
+            if (newItem.submenu) {
+              newItem.submenu = newItem.submenu.filter(sub => 
+                sub.label.toUpperCase() === user.sede.toUpperCase()
+              )
+            }
+            if (!newItem.submenu || newItem.submenu.length > 0) {
+              acc.push(newItem)
+            }
+        } else {
+            // Si es Jefe, lo dejamos pasar completo (todas las sedes)
+            acc.push(item)
         }
       } else {
         acc.push(item)

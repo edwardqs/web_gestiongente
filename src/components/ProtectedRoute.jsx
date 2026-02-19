@@ -42,7 +42,7 @@ export const ProtectedRoute = ({ module, requiredAction = 'read', children }) =>
       
       // --- EXCEPCIÓN PARA VACACIONES ---
       // Si el módulo es 'vacations' y no tiene permiso explícito, pero es Analista/Jefe/Gerente, otorgar permiso de lectura
-      if (!modulePerms && module === 'vacations') {
+      if (!modulePerms && (module === 'vacations' || module === 'dashboard')) {
           const isAnalystOrBoss = user.role?.includes('ANALISTA') || 
                                   user.role?.includes('JEFE') || 
                                   user.position?.includes('ANALISTA') ||

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
 import { getVacationOverview } from '../services/vacations'
 import { getLocations, getDepartmentsByLocation } from '../services/structure'
 import { useAuth } from '../context/AuthContext'
@@ -25,7 +26,19 @@ export default function VacationDashboard() {
                           user?.role === 'JEFE_RRHH' || 
                           user?.position?.includes('JEFE DE GENTE') ||
                           user?.position?.includes('GERENTE') ||
+                          user?.position?.includes('GERENTE GENERAL') ||
                           (user?.permissions && user?.permissions['*'])
+
+    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+    const userRole = normalize(user?.role);
+    const userPosition = normalize(user?.position);
+    
+    const isBoss = userRole.includes('JEFE') || 
+                   userRole.includes('GERENTE') || 
+                   userPosition.includes('JEFE') || 
+                   userPosition.includes('GERENTE') ||
+                   userPosition.includes('COORDINADOR') ||
+                   userPosition.includes('SUPERVISOR');
 
     // Función para cargar filtros guardados del localStorage
     const loadSavedFilters = () => {
@@ -72,8 +85,9 @@ export default function VacationDashboard() {
         }
         
         // Si el usuario tiene restricciones, aplicarlas
+        // CORRECCIÓN: Si es Jefe (isBoss), NO forzar sede, permitir ver todas (empty string)
         return {
-            sede: (!isGlobalAdmin && user?.sede) ? user.sede : (savedFilters?.sede || ''),
+            sede: (!isGlobalAdmin && !isBoss && user?.sede) ? user.sede : (savedFilters?.sede || ''),
             businessUnit: (!isGlobalAdmin && user?.business_unit) ? user.business_unit : (savedFilters?.businessUnit || ''),
             search: savedFilters?.search || '',
             status: savedFilters?.status || 'all'
@@ -117,11 +131,13 @@ export default function VacationDashboard() {
                 setSedes(locs)
             }
 
-            if (!isGlobalAdmin && user?.sede) {
+            // CORRECCIÓN: Si es Jefe, NO forzar sede. Dejar en blanco (todas)
+            if (!isGlobalAdmin && !isBoss && user?.sede) {
                 setSelectedSede(user.sede)
             }
-
-            if (!isGlobalAdmin && user?.business_unit) {
+            
+            // CORRECCIÓN: Si es Jefe, NO forzar business unit. Dejar que use la del filtro guardado o ninguna
+            if (!isGlobalAdmin && !isBoss && user?.business_unit) {
                 setSelectedBusinessUnit(user.business_unit)
             }
         }
@@ -190,8 +206,20 @@ export default function VacationDashboard() {
             let queryBusinessUnit = selectedBusinessUnit
 
             if (!isGlobalAdmin) {
-                if (user?.sede) querySede = user.sede
-                if (user?.business_unit) queryBusinessUnit = user.business_unit
+                if (user?.sede && !isBoss) querySede = user.sede
+                // CORRECCIÓN: Si es Jefe, NO forzar business unit local. Confiar en RPC de áreas.
+                if (user?.business_unit && !isBoss) queryBusinessUnit = user.business_unit
+            }
+
+            // 1. Obtener lista de empleados permitidos por Área (si no es admin)
+            let allowedIds = null;
+            if (!isGlobalAdmin) {
+                 const { data: allowedEmployees } = await supabase.rpc('get_employees_by_user_area')
+                 if (allowedEmployees) {
+                     allowedIds = new Set(allowedEmployees.map(e => e.id))
+                 } else {
+                     allowedIds = new Set() // Sin acceso
+                 }
             }
 
             // Pasamos queryBusinessUnit al servicio para filtrado server-side
@@ -206,6 +234,12 @@ export default function VacationDashboard() {
                 filteredResult = filteredResult.filter(emp => 
                     emp.business_unit === queryBusinessUnit
                 )
+            }
+            
+            // FILTRADO POR ÁREA (Seguridad estricta)
+            if (allowedIds) {
+                // CORRECCIÓN: get_vacation_overview devuelve 'employee_id', no 'id'
+                filteredResult = filteredResult.filter(emp => allowedIds.has(emp.employee_id))
             }
 
             setEmployees(filteredResult)
@@ -251,7 +285,7 @@ export default function VacationDashboard() {
 
     const handleSedeChange = (e) => {
         const newSede = e.target.value
-        if (!isGlobalAdmin && user?.sede && newSede !== user.sede && newSede !== '') {
+        if (!isGlobalAdmin && !isBoss && user?.sede && newSede !== user.sede && newSede !== '') {
             console.warn('Usuario no autorizado para cambiar de sede')
             return
         }
@@ -259,7 +293,7 @@ export default function VacationDashboard() {
     }
 
     const handleClearFilters = () => {
-        const defaultSede = (!isGlobalAdmin && user?.sede) ? user.sede : ''
+        const defaultSede = (!isGlobalAdmin && !isBoss && user?.sede) ? user.sede : ''
         const defaultBU = (!isGlobalAdmin && user?.business_unit) ? user.business_unit : ''
         
         setSelectedSede(defaultSede)
@@ -274,7 +308,7 @@ export default function VacationDashboard() {
         }
     }
 
-    const sedeDisabled = !isGlobalAdmin && !!user?.sede
+    const sedeDisabled = !isGlobalAdmin && !isBoss && !!user?.sede
     const businessUnitDisabled = !selectedSede || businessUnits.length === 0 || (!isGlobalAdmin && !!user?.business_unit)
 
     const hasActiveFilters = searchTerm !== '' || statusFilter !== 'all' || 

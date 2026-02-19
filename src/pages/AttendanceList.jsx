@@ -229,8 +229,31 @@ export default function AttendanceList() {
                 user?.position?.includes('JEFE DE GENTE') ||
                 user?.position?.includes('JEFE DE RRHH') ||
                 user?.position?.includes('GERENTE') ||
+                user?.position?.includes('GERENTE GENERAL') ||
                 (user?.permissions && user?.permissions['*'])
             ) && !user?.position?.includes('ANALISTA');
+
+            const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+            const userRole = normalize(user?.role);
+            const userPosition = normalize(user?.position);
+            
+            const isBoss = userRole.includes('JEFE') || 
+                           userRole.includes('GERENTE') || 
+                           userPosition.includes('JEFE') || 
+                           userPosition.includes('GERENTE') ||
+                           userPosition.includes('COORDINADOR') ||
+                           userPosition.includes('SUPERVISOR');
+
+            // --- NUEVO: Obtener empleados permitidos por Área (Seguridad estricta) ---
+            let allowedIds = null;
+            if (!isGlobalAdmin) {
+                 const { data: allowedEmployees } = await supabase.rpc('get_employees_by_user_area')
+                 if (allowedEmployees) {
+                     allowedIds = new Set(allowedEmployees.map(e => e.id))
+                 } else {
+                     allowedIds = new Set() // Sin acceso
+                 }
+            }
 
             // Detectar si estamos viendo un solo día (modo reporte diario / Roster)
             // IMPORTANTE: Solo usar modo Roster si el filtro de estado es general
@@ -247,7 +270,9 @@ export default function AttendanceList() {
                 let rpcSede = null
                 let rpcBusinessUnit = null
                 
-                if (!isGlobalAdmin) {
+                // Si no es admin y no es jefe, optimizar restringiendo por Sede en RPC
+                // Si es Jefe, dejamos Sede abierta (null) y filtramos en memoria por Área
+                if (!isGlobalAdmin && !isBoss) {
                     if (user?.sede) rpcSede = user.sede
                     if (user?.business_unit) rpcBusinessUnit = user.business_unit
                 }
@@ -259,14 +284,18 @@ export default function AttendanceList() {
                     p_search: filters.search || null,
                     // Para 'absent' pasamos null y filtramos en memoria (más confiable)
                     p_status: (filters.status === 'all' || filters.status === 'absent') ? null : filters.status,
-                    p_page: filters.status === 'absent' ? 1 : page,  // Siempre página 1 para absent
-                    p_limit: filters.status === 'absent' ? 1000 : PAGE_SIZE  // Límite alto para traer todos
+                    // CORRECCIÓN: Si estamos filtrando por Área (allowedIds) o status='absent',
+                    // debemos traer MÁS registros para poder filtrar y paginar correctamente en cliente.
+                    p_page: 1,  
+                    p_limit: 1000 // Siempre traer bloque grande para permitir filtrado en cliente
                 })
 
                 if (rpcError) throw rpcError
 
                 if (rpcData && rpcData.data) {
                     reportData = rpcData.data
+                    // Si el RPC devuelve el total real de la query, usamos ese como base, 
+                    // pero si vamos a filtrar, lo recalcularemos.
                     totalRows = rpcData.total || 0
                 }
 
@@ -317,41 +346,70 @@ export default function AttendanceList() {
                         const isComputedAbsent = item.status === 'absent'
                         return isAbsenceType || isImplicitAbsence || isComputedAbsent
                     })
-                    // Actualizar total después del filtrado
-                    totalRows = processedList.length
-                    
-                    // Aplicar paginación en memoria
-                    const start = (page - 1) * PAGE_SIZE
-                    processedList = processedList.slice(start, start + PAGE_SIZE)
+                    // No cortamos aquí, cortamos al final junto con el resto
                 }
 
+                setAttendances(processedList)
+                
+                // Filtrar por empleados permitidos si no es admin
+                if (allowedIds) {
+                    processedList = processedList.filter(item => allowedIds.has(item.employee_id))
+                }
+                
+                // Paginación en memoria para Roster Mode
+                totalRows = processedList.length
+                
+                // Guardar lista completa para estadísticas antes de paginar
+                const fullListForStats = [...processedList]
+
+                const start = (page - 1) * PAGE_SIZE
+                processedList = processedList.slice(start, start + PAGE_SIZE)
+                
                 setAttendances(processedList)
                 setTotalRecords(totalRows)
                 setTotalPages(Math.ceil(totalRows / PAGE_SIZE))
                 
                 // Obtener estadísticas globales para el día seleccionado
                 if (page === 1) { 
-                      try {
-                        const { data: statsData, error: statsError } = await supabase.rpc('get_daily_attendance_stats', {
-                            p_date: filters.dateFrom,
-                            p_sede: rpcSede,
-                            p_business_unit: rpcBusinessUnit,
-                            p_search: filters.search || null
-                        })
+                    // CORRECCIÓN: Si tenemos filtrado por Área (allowedIds) o filtros locales,
+                    // calculamos las stats en memoria basándonos en processedList (que ya está filtrada)
+                    // para asegurar que los números coincidan con la tabla.
+                    if (allowedIds && allowedIds.size > 0) {
+                         const total = fullListForStats.length
+                         const onTime = fullListForStats.filter(i => i.record_type === 'ASISTENCIA' && !i.is_late).length
+                         const late = fullListForStats.filter(i => i.record_type === 'ASISTENCIA' && i.is_late).length
+                         const absent = fullListForStats.filter(i => {
+                             const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(i.record_type)
+                             const isImplicitAbsence = !i.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(i.record_type)
+                             const isComputedAbsent = i.status === 'absent'
+                             return isAbsenceType || isImplicitAbsence || isComputedAbsent
+                         }).length
 
-                        if (statsError) console.error('Error fetching daily stats:', statsError)
-                        
-                        if (statsData) {
-                            setGlobalStats({
-                                total: statsData.total,
-                                onTime: statsData.onTime,
-                                late: statsData.late,
-                                absent: statsData.absent
+                         setGlobalStats({ total, onTime, late, absent })
+                    } else {
+                        // Si no hay restricciones de área, usamos el RPC para eficiencia
+                        try {
+                            const { data: statsData, error: statsError } = await supabase.rpc('get_daily_attendance_stats', {
+                                p_date: filters.dateFrom,
+                                p_sede: rpcSede,
+                                p_business_unit: rpcBusinessUnit,
+                                p_search: filters.search || null
                             })
+
+                            if (statsError) console.error('Error fetching daily stats:', statsError)
+                            
+                            if (statsData) {
+                                setGlobalStats({
+                                    total: statsData.total,
+                                    onTime: statsData.onTime,
+                                    late: statsData.late,
+                                    absent: statsData.absent
+                                })
+                            }
+                        } catch (err) {
+                            console.error('Stats fetch error:', err)
                         }
-                      } catch (err) {
-                        console.error('Stats fetch error:', err)
-                      }
+                    }
                 }
 
                 setLoading(false)
@@ -450,13 +508,20 @@ export default function AttendanceList() {
                     `, { count: 'exact' })
 
                 if (!isGlobalAdmin) {
-                    if (user?.sede) {
-                        query = query.eq('employees.sede', user.sede)
-                    }
-                    if (user?.business_unit) {
-                        query = query.eq('employees.business_unit', user.business_unit)
-                    }
-                }
+                     // MODO SEGURO: Usar allowedIds (Área)
+                     if (allowedIds && allowedIds.size > 0) {
+                          // Usar .in() para filtrar en la base de datos
+                          query = query.in('employee_id', Array.from(allowedIds))
+                     } else if (isBoss) {
+                          // Si es Jefe y allowedIds está vacío, significa que el RPC falló o no tiene gente.
+                          // NO aplicar filtro de sede fallback, porque entonces vería ADM CENTRAL.
+                          // Mejor mostrar vacío para evitar fuga de datos.
+                          query = query.eq('id', '00000000-0000-0000-0000-000000000000') // ID imposible
+                     } else if (user?.sede) {
+                         // Fallback antiguo si no es Jefe (Analista, etc.)
+                         query = query.eq('employees.sede', user.sede)
+                     }
+                 }
 
                 // 1. Aplicar filtros de FECHA (usando variables locales con defaults)
                 query = query.gte('work_date', filters.dateFrom)
@@ -515,15 +580,16 @@ export default function AttendanceList() {
                 employees: item.employees || {}
             }))
 
-            // Filtrado de seguridad por sede/business unit
+            // Filtrado de seguridad (igual que loadAttendances)
+            // Ya filtramos por ID en la consulta SQL (modo histórico) o en memoria (roster).
+            // Quitamos los filtros manuales redundantes para evitar conflictos
+            /*
             if (!isGlobalAdmin) {
-                if (user?.sede) {
+                if (user?.sede && !isBoss) {
                     processedList = processedList.filter(item => item.employees.sede === user.sede)
                 }
-                if (user?.business_unit) {
-                    processedList = processedList.filter(item => item.employees.business_unit === user.business_unit)
-                }
             }
+            */
 
             // Filtrado por búsqueda en memoria
             if (filters.search && filters.search.length > 0) {
@@ -546,15 +612,33 @@ export default function AttendanceList() {
 
             let displayList = processedList
             
-            if (!isGlobalAdmin || (filters.status !== 'all' && filters.status !== 'absent' && filters.status !== 'on_time' && filters.status !== 'late')) {
-                totalRows = processedList.length
-                const start = (page - 1) * PAGE_SIZE
-                displayList = processedList.slice(start, start + PAGE_SIZE)
+            // CORRECCIÓN PAGINACIÓN: Si hay filtrado en cliente, totalRows debe ser el length de la lista filtrada
+            // El RPC devuelve total de la query, pero si filtramos en memoria, la paginación se rompe.
+            // Si usamos allowedIds, SIEMPRE filtramos en SQL (query.in), así que el count es correcto.
+            // PERO si filtramos por "search" o "status=absent" en memoria, debemos ajustar.
+            
+            const hasClientSideFiltering = 
+                (filters.search && filters.search.length > 0) || 
+                (filters.status === 'absent') ||
+                useRosterMode ||
+                filters.status === 'vacation';
+
+            if (hasClientSideFiltering) {
+                 totalRows = processedList.length
+                 const start = (page - 1) * PAGE_SIZE
+                 displayList = processedList.slice(start, start + PAGE_SIZE)
             } else {
-                // Si ya tenemos totalRows de la consulta (queryCount), lo usamos.
-                // Si no (caso vacaciones o roster), usamos la longitud de la lista procesada.
-                if (filters.status === 'vacation' || useRosterMode) {
-                     totalRows = processedList.length
+                // Modo histórico normal (sin filtrado extra en memoria)
+                // Aquí confiamos en el count de la query y el range
+                if (isGlobalAdmin && (filters.status === 'all' || filters.status === 'absent')) {
+                     // Admin paginó en SQL
+                     displayList = processedList
+                } else {
+                     // Otros casos pueden requerir slice si la query trajo todo (limit 1000)
+                     if (processedList.length > PAGE_SIZE) {
+                         const start = (page - 1) * PAGE_SIZE
+                         displayList = processedList.slice(start, start + PAGE_SIZE)
+                     }
                 }
             }
 
@@ -570,10 +654,25 @@ export default function AttendanceList() {
             const absent = processedList.filter(i => {
                 const isAbsenceType = ['AUSENCIA', 'INASISTENCIA', 'FALTA JUSTIFICADA', 'AUSENCIA SIN JUSTIFICAR', 'FALTA_INJUSTIFICADA'].includes(i.record_type)
                 const isImplicitAbsence = !i.check_in && !['DESCANSO MÉDICO', 'LICENCIA CON GOCE', 'VACACIONES', 'ASISTENCIA'].includes(i.record_type)
-                return isAbsenceType || isImplicitAbsence
+                // Si el status ya es 'absent' (calculado por RPC o frontend), contarlo
+                const isComputedAbsent = i.status === 'absent'
+                return isAbsenceType || isImplicitAbsence || isComputedAbsent
             }).length
             
-            setGlobalStats({ total, onTime, late, absent })
+            // CORRECCIÓN: Si estamos en modo Roster (Reporte Diario) y el RPC devolvió estadísticas, usarlas.
+            // PERO si hemos filtrado por Área (allowedIds), debemos recalcular en base a processedList
+            // para que las tarjetas (KPIs) coincidan con la tabla.
+            
+            // Si hay filtrado en cliente, SIEMPRE usar las stats calculadas localmente sobre processedList
+            if (hasClientSideFiltering || (allowedIds && allowedIds.size > 0)) {
+                 setGlobalStats({ total, onTime, late, absent })
+            } else if (useRosterMode) {
+                 // Si es Roster sin filtros extra, intentamos mantener las stats del RPC (si existen) o usamos las locales
+                 // Como ya calculamos las locales arriba, podemos usarlas si preferimos consistencia absoluta.
+                 setGlobalStats({ total, onTime, late, absent })
+            } else {
+                 setGlobalStats({ total, onTime, late, absent })
+            }
 
         } catch (error) {
             console.error('Error cargando asistencias:', error)
@@ -645,8 +744,20 @@ export default function AttendanceList() {
                 user?.position?.includes('JEFE DE GENTE') ||
                 user?.position?.includes('JEFE DE RRHH') ||
                 user?.position?.includes('GERENTE') ||
+                user?.position?.includes('GERENTE GENERAL') ||
                 (user?.permissions && user?.permissions['*'])
             ) && !user?.position?.includes('ANALISTA');
+
+            const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+            const userRole = normalize(user?.role);
+            const userPosition = normalize(user?.position);
+            
+            const isBoss = userRole.includes('JEFE') || 
+                           userRole.includes('GERENTE') || 
+                           userPosition.includes('JEFE') || 
+                           userPosition.includes('GERENTE') ||
+                           userPosition.includes('COORDINADOR') ||
+                           userPosition.includes('SUPERVISOR');
 
             let isSingleDate = startDate && endDate && (startDate === endDate)
             // Solo usar modo Roster si el filtro de estado es general (all, on_time, late, absent)
@@ -660,7 +771,7 @@ export default function AttendanceList() {
                 let rpcBusinessUnit = null
                 
                 if (!isGlobalAdmin) {
-                    if (user?.sede) rpcSede = user.sede
+                    if (user?.sede && !isBoss) rpcSede = user.sede
                     if (user?.business_unit) rpcBusinessUnit = user.business_unit
                 }
 
@@ -813,7 +924,7 @@ export default function AttendanceList() {
                     `)
 
                 if (!isGlobalAdmin) {
-                    if (user?.sede) {
+                    if (user?.sede && !isBoss) {
                         query = query.eq('employees.sede', user.sede)
                     }
                     if (user?.business_unit) {
@@ -851,7 +962,7 @@ export default function AttendanceList() {
 
                 // Filtrado de seguridad (igual que loadAttendances)
                 if (!isGlobalAdmin) {
-                    if (user?.sede) {
+                    if (user?.sede && !isBoss) {
                         exportData = exportData.filter(item => item.employees.sede === user.sede)
                     }
                     if (user?.business_unit) {

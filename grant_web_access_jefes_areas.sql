@@ -58,7 +58,7 @@ WHERE position ILIKE '%ENCARGADO%'
 -- 3. FUNCIÓN RPC PARA OBTENER EMPLEADOS FILTRADOS POR ÁREA
 -- Esta función será usada por el frontend para listar empleados
 -- Si eres Admin/RRHH -> Ves todo
--- Si eres Jefe/Gerente/Etc -> Ves solo los empleados de tu misma ÁREA (basado en job_positions.area_id)
+-- Si eres Jefe/Gerente/Etc -> Ves solo los empleados de tu misma ÁREA (basado en job_positions.area_id O business_unit)
 
 CREATE OR REPLACE FUNCTION public.get_employees_by_user_area()
 RETURNS TABLE (
@@ -86,18 +86,21 @@ DECLARE
     v_user_email text;
     v_user_role text;
     v_user_area_id bigint;
+    v_user_business_unit text;
 BEGIN
     -- Obtener email del usuario autenticado
     v_user_email := auth.email();
     
-    -- Obtener rol y area_id del usuario actual
+    -- Obtener rol, area_id y business_unit del usuario actual
     -- Hacemos JOIN con job_positions para sacar el area_id del cargo del usuario
     SELECT 
         e.role, 
-        jp.area_id 
+        jp.area_id,
+        e.business_unit
     INTO 
         v_user_role, 
-        v_user_area_id
+        v_user_area_id,
+        v_user_business_unit
     FROM public.employees e
     LEFT JOIN public.job_positions jp ON e.position = jp.name
     WHERE e.email = v_user_email;
@@ -105,7 +108,7 @@ BEGIN
     -- LÓGICA DE FILTRADO
     
     -- CASO 1: ADMIN, SUPER ADMIN, RRHH, GERENTES, JEFE DE GENTE -> Ven TODO
-    IF v_user_role IN ('ADMIN', 'SUPER ADMIN', 'JEFE_RRHH', 'ANALISTA_RRHH', 'ANALISTA DE GENTE Y GESTION', 'GERENTE', 'JEFE DE GENTE Y GESTIÓN') 
+    IF v_user_role IN ('ADMIN', 'SUPER ADMIN', 'JEFE_RRHH', 'ANALISTA_RRHH', 'ANALISTA DE GENTE Y GESTION', 'GERENTE', 'JEFE DE GENTE Y GESTIÓN', 'GERENTE GENERAL') 
        OR v_user_role ILIKE '%ADMIN%' 
        OR v_user_role ILIKE '%GERENTE%'
        OR v_user_role ILIKE '%JEFE DE GENTE%' THEN
@@ -119,7 +122,7 @@ BEGIN
         LEFT JOIN public.areas a ON jp.area_id = a.id
         ORDER BY e.full_name;
         
-    -- CASO 2: TIENE ÁREA ASIGNADA -> Ve solo su área
+    -- CASO 2: TIENE ÁREA ASIGNADA -> PRIORIDAD ABSOLUTA AL ÁREA
     ELSIF v_user_area_id IS NOT NULL THEN
         RETURN QUERY 
         SELECT 
@@ -129,10 +132,25 @@ BEGIN
         FROM public.employees e
         LEFT JOIN public.job_positions jp ON e.position = jp.name
         LEFT JOIN public.areas a ON jp.area_id = a.id
-        WHERE jp.area_id = v_user_area_id
+        WHERE 
+            jp.area_id = v_user_area_id -- Solo empleados que coincidan con el area_id del jefe
+        ORDER BY e.full_name;
+
+    -- CASO 3: NO TIENE ÁREA PERO TIENE BUSINESS UNIT (FALLBACK LEGACY)
+    ELSIF v_user_business_unit IS NOT NULL THEN
+        RETURN QUERY 
+        SELECT 
+            e.id, e.full_name, e.dni, e.email, e.position, e.sede, e.business_unit, e.profile_picture_url, e.role, e.is_active,
+            e.entry_date, e.employee_type, e.phone, e.address, e.birth_date,
+            a.name as area_name
+        FROM public.employees e
+        LEFT JOIN public.job_positions jp ON e.position = jp.name
+        LEFT JOIN public.areas a ON jp.area_id = a.id
+        WHERE 
+            e.business_unit = v_user_business_unit
         ORDER BY e.full_name;
         
-    -- CASO 3: NO TIENE ÁREA NI ROL ADMIN -> Ve solo su propio perfil (o nada)
+    -- CASO 4: NO TIENE ÁREA NI ROL ADMIN -> Ve solo su propio perfil (o nada)
     ELSE
         RETURN QUERY 
         SELECT 

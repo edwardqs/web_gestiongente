@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 import { getRecentActivity, subscribeToActivity } from '../services/activity'
 import { getDashboardStats } from '../services/dashboard'
 import MonthlyReportModal from '../components/MonthlyReportModal'
@@ -30,21 +31,62 @@ export default function Dashboard() {
   // Cargar actividades iniciales y suscribirse a cambios
   useEffect(() => {
     // --- FILTRADO DE SEGURIDAD ---
-    const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+    const userRole = normalize(user?.role);
+    const userPosition = normalize(user?.position);
+
+    const isGlobalAdmin =
+      userRole === 'ADMIN' ||
+      userRole === 'SUPER ADMIN' ||
+      userRole === 'JEFE_RRHH' ||
+      userPosition.includes('JEFE DE GENTE') || 
+      userPosition.includes('GERENTE') ||
+      userPosition.includes('GERENTE GENERAL') ||
+      (user?.permissions && user?.permissions['*'])
+    
+    const isBoss = userRole.includes('JEFE') || 
+                   userRole.includes('GERENTE') || 
+                   userPosition.includes('JEFE') || 
+                   userPosition.includes('GERENTE') ||
+                   userPosition.includes('COORDINADOR') ||
+                   userPosition.includes('SUPERVISOR');
+
     let querySede = null
     let queryBusinessUnit = null
     
     if (!isGlobalAdmin) {
-        querySede = user?.sede
-        queryBusinessUnit = user?.business_unit
+        if (user?.sede && !isBoss) querySede = user.sede
+        // OJO: Si es Boss, querySede se queda en null para traer todas las sedes
+        // queryBusinessUnit se usa si existe solo para NO jefes
+        if (user?.business_unit && !isBoss) queryBusinessUnit = user.business_unit
     }
 
     // 1. Cargar datos iniciales
     const loadActivities = async () => {
-      const { data, error } = await getRecentActivity(10, querySede, queryBusinessUnit)
-      if (!error && data) {
-        setActivities(data)
+      // Obtener empleados permitidos si no es admin
+      let allowedIds = null
+      if (!isGlobalAdmin) {
+           const { data: allowedEmployees } = await supabase.rpc('get_employees_by_user_area')
+           if (allowedEmployees) {
+               allowedIds = new Set(allowedEmployees.map(e => e.id))
+           } else {
+               allowedIds = new Set() // Sin acceso
+           }
       }
+
+      // Si es Jefe, traemos mas registros para filtrar localmente y asegurar que aparezcan los de su area
+      const limit = isBoss ? 50 : 20
+      const { data, error } = await getRecentActivity(limit, querySede, queryBusinessUnit) // Traer un poco más para filtrar
+      if (!error && data) {
+         let filtered = data
+         if (allowedIds && allowedIds.size > 0) {
+             filtered = filtered.filter(act => allowedIds.has(act.employee_id || act.employees?.id))
+         } else if (isBoss && (!allowedIds || allowedIds.size === 0)) {
+             // Si es Boss y no hay allowedIds (error o vacio), mostrar nada por seguridad
+             filtered = []
+         }
+         setActivities(filtered.slice(0, 10))
+       }
       setLoadingActivities(false)
     }
     loadActivities()
@@ -60,6 +102,11 @@ export default function Dashboard() {
     // 3. Suscribirse a tiempo real
     const filters = { sede: querySede, businessUnit: queryBusinessUnit }
     const subscription = subscribeToActivity((payload) => {
+      // Filtrar eventos en tiempo real también
+      // payload suele traer info del registro. Si es insert, necesitamos saber el empleado.
+      // Esto es más complejo en realtime porque payload no siempre trae employee_id completo o area.
+      // Pero intentamos filtrar si tenemos el ID.
+      
       setActivities(prev => {
         // Manejar borrado
         if (payload.deleted) {

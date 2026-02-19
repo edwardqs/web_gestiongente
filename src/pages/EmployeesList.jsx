@@ -65,9 +65,23 @@ export default function EmployeesList() {
                         user?.role === 'JEFE_RRHH' || 
                         user?.position?.includes('JEFE DE GENTE') || 
                         user?.position?.includes('GERENTE') || 
+                        user?.position?.includes('GERENTE GENERAL') || 
                         (user?.permissions && user?.permissions['*'])
-  
-  if (!isGlobalAdmin && user?.sede) {
+
+  // --- CORRECCIÓN: PERMITIR A JEFES/GERENTES VER OTRAS SEDES ---
+  // El filtro estricto solo aplica a usuarios rasos (que no son Jefes/Gerentes)
+  const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+  const userRole = normalize(user?.role);
+  const userPosition = normalize(user?.position);
+
+  const isBoss = userRole.includes('JEFE') || 
+                 userRole.includes('GERENTE') || 
+                 userPosition.includes('JEFE') || 
+                 userPosition.includes('GERENTE') ||
+                 userPosition.includes('COORDINADOR') ||
+                 userPosition.includes('SUPERVISOR');
+
+  if (!isGlobalAdmin && !isBoss && user?.sede) {
       // Normalizar nombres para comparación
       const userSedeNorm = user.sede.toUpperCase().trim()
       if (currentSedeName?.toUpperCase() !== userSedeNorm) {
@@ -87,14 +101,14 @@ export default function EmployeesList() {
       // 1. Cargar empleados con lógica diferenciada
       let query
 
-      if (isGlobalAdmin) {
-          // Admin ve todo (filtrado solo por UI)
+      if (isGlobalAdmin) { 
+          // Admin ve todo
           query = supabase
             .from('employees')
             .select('*')
       } else {
-          // Jefes/Usuarios ven solo su ÁREA (RPC inteligente)
-          // Nota: Requiere que se haya ejecutado el script grant_web_access_jefes_areas.sql
+          // Jefes y Usuarios rasos ven solo su ÁREA (RPC inteligente)
+          // El RPC filtra por area_id, asegurando que un Jefe de Operaciones solo vea Operaciones
           query = supabase.rpc('get_employees_by_user_area')
       }
       
@@ -104,11 +118,14 @@ export default function EmployeesList() {
       // Aplicar filtro de sede (seguro)
       if (currentSedeName) {
         query = query.eq('sede', currentSedeName)
+      } else if (!isGlobalAdmin && !isBoss && user?.sede) {
+        // Fallback: si no hay sede en URL y no es jefe, usar la del usuario
+        query = query.eq('sede', user.sede)
       }
 
       // Aplicar filtro de unidad de negocio
-      // Si el usuario no es admin y tiene business_unit asignada, forzar filtro
-      if (!isGlobalAdmin && user?.business_unit) {
+      // Si el usuario no es admin/jefe y tiene business_unit asignada, forzar filtro
+      if (!isGlobalAdmin && !isBoss && user?.business_unit) {
           query = query.eq('business_unit', user.business_unit.toUpperCase())
       } else if (businessUnit) {
           query = query.eq('business_unit', businessUnit.toUpperCase())
