@@ -228,6 +228,7 @@ export default function AttendanceList() {
                 user?.role === 'JEFE_RRHH' || 
                 user?.position?.includes('JEFE DE GENTE') ||
                 user?.position?.includes('JEFE DE RRHH') ||
+                user?.position?.includes('GERENTE') ||
                 (user?.permissions && user?.permissions['*'])
             ) && !user?.position?.includes('ANALISTA');
 
@@ -430,11 +431,15 @@ export default function AttendanceList() {
 
             } else {
                 // MODO HISTÓRICO NORMAL (Consulta a attendance)
+                
+                // Si no es admin global, filtramos por sede/unidad usando inner join
+                const employeeJoinType = isGlobalAdmin ? 'employees!attendance_employee_id_fkey' : 'employees!attendance_employee_id_fkey!inner';
+                
                 let query = supabase
                     .from('attendance')
                     .select(`
                         *,
-                        employees!attendance_employee_id_fkey (
+                        ${employeeJoinType} (
                             full_name,
                             dni,
                             position,
@@ -443,6 +448,15 @@ export default function AttendanceList() {
                             profile_picture_url
                         )
                     `, { count: 'exact' })
+
+                if (!isGlobalAdmin) {
+                    if (user?.sede) {
+                        query = query.eq('employees.sede', user.sede)
+                    }
+                    if (user?.business_unit) {
+                        query = query.eq('employees.business_unit', user.business_unit)
+                    }
+                }
 
                 // 1. Aplicar filtros de FECHA (usando variables locales con defaults)
                 query = query.gte('work_date', filters.dateFrom)
@@ -630,6 +644,7 @@ export default function AttendanceList() {
                 user?.role === 'JEFE_RRHH' || 
                 user?.position?.includes('JEFE DE GENTE') ||
                 user?.position?.includes('JEFE DE RRHH') ||
+                user?.position?.includes('GERENTE') ||
                 (user?.permissions && user?.permissions['*'])
             ) && !user?.position?.includes('ANALISTA');
 
@@ -781,11 +796,14 @@ export default function AttendanceList() {
                 qEnd.setDate(qEnd.getDate() + 1);
                 const queryEndStr = qEnd.toISOString().split('T')[0];
 
+                // Si no es admin global, filtramos por sede/unidad usando inner join
+                const employeeJoinType = isGlobalAdmin ? 'employees!attendance_employee_id_fkey' : 'employees!attendance_employee_id_fkey!inner';
+
                 let query = supabase
                     .from('attendance')
                     .select(`
                         *,
-                        employees!attendance_employee_id_fkey (
+                        ${employeeJoinType} (
                             full_name,
                             dni,
                             position,
@@ -793,7 +811,18 @@ export default function AttendanceList() {
                             business_unit
                         )
                     `)
-                    // Usamos el rango ampliado
+
+                if (!isGlobalAdmin) {
+                    if (user?.sede) {
+                        query = query.eq('employees.sede', user.sede)
+                    }
+                    if (user?.business_unit) {
+                        query = query.eq('employees.business_unit', user.business_unit)
+                    }
+                }
+                
+                // Usamos el rango ampliado
+                query = query
                     .gte('work_date', queryStartStr)
                     .lte('work_date', queryEndStr)
                     .order('work_date', { ascending: false })

@@ -23,6 +23,8 @@ export default function VacationDashboard() {
     const isGlobalAdmin = user?.role === 'ADMIN' || 
                           user?.role === 'SUPER ADMIN' || 
                           user?.role === 'JEFE_RRHH' || 
+                          user?.position?.includes('JEFE DE GENTE') ||
+                          user?.position?.includes('GERENTE') ||
                           (user?.permissions && user?.permissions['*'])
 
     // Función para cargar filtros guardados del localStorage
@@ -185,24 +187,24 @@ export default function VacationDashboard() {
         try {
             const searchParam = searchTerm.length > 2 ? searchTerm : null
             let querySede = selectedSede
-            
-            if (!isGlobalAdmin && user?.sede) {
-                querySede = user.sede
+            let queryBusinessUnit = selectedBusinessUnit
+
+            if (!isGlobalAdmin) {
+                if (user?.sede) querySede = user.sede
+                if (user?.business_unit) queryBusinessUnit = user.business_unit
             }
 
-            const { data, error } = await getVacationOverview(querySede, searchParam)
+            // Pasamos queryBusinessUnit al servicio para filtrado server-side
+            const { data, error } = await getVacationOverview(querySede, searchParam, queryBusinessUnit)
             
             if (error) throw error
             
             let filteredResult = data || []
             
-            if (selectedBusinessUnit) {
+            // Si el RPC no soporta el filtro, o para asegurar consistencia UI, filtramos en memoria
+            if (queryBusinessUnit) {
                 filteredResult = filteredResult.filter(emp => 
-                    emp.business_unit === selectedBusinessUnit
-                )
-            } else if (!isGlobalAdmin && user?.business_unit) {
-                filteredResult = filteredResult.filter(emp => 
-                    emp.business_unit === user.business_unit
+                    emp.business_unit === queryBusinessUnit
                 )
             }
 

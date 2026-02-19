@@ -1,0 +1,63 @@
+{
+  "operaciones": [
+    {
+      "id": "6e399e47-7817-4d28-95f4-1ab9716afa65",
+      "full_name": "URBINA GAITAN WILMER GIANFRANCO",
+      "dni": "43645479",
+      "email": "wurbina@pauserdistribuciones.com",
+      "position": "JEFE DE OPERACIONES",
+      "sede": "ADM. CENTRAL",
+      "business_unit": "ADMINISTRACION",
+      "is_active": true
+    }
+  ],
+  "finanzas": [
+    {
+      "id": "152df139-2498-49ee-a52e-cb671e9bb863",
+      "full_name": "OSHIRO NISHITATE ROSA SAYURI",
+      "dni": "47797737",
+      "email": "soshiro@pauserdistribuciones.com",
+      "position": "JEFE DE ADMINISTRACIÓN Y FINANZAS",
+      "sede": "ADM. CENTRAL",
+      "business_unit": "ADMINISTRACION",
+      "is_active": true
+    }
+  ],
+  "gente_y_gestion": [
+    {
+      "id": "087bc216-9392-47f4-9c88-78ac7fcb8813",
+      "full_name": "SANCHEZ BARRANTES ANA ESTHER",
+      "dni": "46644067",
+      "email": "asanchez@pauserdistribuciones.com",
+      "position": "JEFE DE GENTE Y GESTIÓN",
+      "sede": "ADM. CENTRAL",
+      "business_unit": "ADMINISTRACION",
+      "is_active": true
+    }
+  ],
+  "comercial": [
+    {
+      "id": "3d169ca2-bf52-4832-965b-f30b00d97285",
+      "full_name": "PANDO OTINIANO LUCIANA",
+      "dni": "43647586",
+      "email": "lpando@pauserdistribuciones.com",
+      "position": "JEFE COMERCIAL",
+      "sede": "ADM. CENTRAL",
+      "business_unit": "ADMINISTRACION",
+      "is_active": true
+    }
+  ],
+  "gerencia": [
+    {
+      "id": "c864e590-a97e-46f6-b6ee-125fc17c25e5",
+      "full_name": "URBINA GAITAN GIANCARLO",
+      "dni": "18161904",
+      "email": "gurbina@pauserdistribuciones.com",
+      "position": "GERENTE GENERAL",
+      "sede": "ADM. CENTRAL",
+      "business_unit": "ADMINISTRACION",
+      "is_active": true
+    }
+  ],
+  "otros_jefes": []
+}

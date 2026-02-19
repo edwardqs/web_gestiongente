@@ -60,7 +60,12 @@ export default function EmployeesList() {
   let currentSedeName = sedeMap[sede] || sede
   
   // Seguridad: Sobreescribir si el usuario tiene una sede asignada y NO es admin
-  const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+  const isGlobalAdmin = user?.role === 'ADMIN' || 
+                        user?.role === 'SUPER ADMIN' || 
+                        user?.role === 'JEFE_RRHH' || 
+                        user?.position?.includes('JEFE DE GENTE') || 
+                        user?.position?.includes('GERENTE') || 
+                        (user?.permissions && user?.permissions['*'])
   
   if (!isGlobalAdmin && user?.sede) {
       // Normalizar nombres para comparación
@@ -79,11 +84,22 @@ export default function EmployeesList() {
   const fetchEmployees = async () => {
     setLoading(true)
     try {
-      // 1. Cargar empleados
-      let query = supabase
-        .from('employees')
-        .select('*')
-        .order('full_name', { ascending: true })
+      // 1. Cargar empleados con lógica diferenciada
+      let query
+
+      if (isGlobalAdmin) {
+          // Admin ve todo (filtrado solo por UI)
+          query = supabase
+            .from('employees')
+            .select('*')
+      } else {
+          // Jefes/Usuarios ven solo su ÁREA (RPC inteligente)
+          // Nota: Requiere que se haya ejecutado el script grant_web_access_jefes_areas.sql
+          query = supabase.rpc('get_employees_by_user_area')
+      }
+      
+      // Ordenamiento común
+      query = query.order('full_name', { ascending: true })
 
       // Aplicar filtro de sede (seguro)
       if (currentSedeName) {

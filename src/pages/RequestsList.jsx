@@ -59,23 +59,45 @@ export default function RequestsList() {
         status: (req.status || 'PENDIENTE').trim().toUpperCase(),
       }))
 
+      // 3. Filtrado de Seguridad (Jefes vs Admin)
+      // Si el rol es de Jefatura (no admin global), usar RPC para filtrar por área
+      // Si es Admin Global, ya tenemos todo
+      const userRole = user?.role || ''
       const isGlobalAdmin =
-        user?.role === 'ADMIN' ||
-        user?.role === 'SUPER ADMIN' ||
-        user?.role === 'JEFE_RRHH' ||
+        userRole === 'ADMIN' ||
+        userRole === 'SUPER ADMIN' ||
+        userRole === 'JEFE_RRHH' ||
+        user?.position?.includes('JEFE DE GENTE') || 
+        user?.position?.includes('GERENTE') ||
         (user?.permissions && user?.permissions['*'])
 
       if (!isGlobalAdmin) {
-        if (user?.sede) {
-          filteredData = filteredData.filter(
-            (req) => req.employees?.sede === user.sede
-          )
-        }
-        if (user?.business_unit) {
-          filteredData = filteredData.filter(
-            (req) => req.employees?.business_unit === user.business_unit
-          )
-        }
+          // Si no es admin, necesitamos filtrar.
+          // Opción A: Filtrado en cliente si ya trajimos todo (menos eficiente pero rápido de implementar)
+          // Opción B: Usar una RPC similar a get_employees_by_user_area pero para requests
+          
+          // Dado que getRequests trae TODO con un join, y el usuario "no admin" podría no tener acceso a ver todo,
+          // lo ideal sería una RPC. Pero para no romper, filtraremos en cliente usando la info de área si la tenemos.
+          
+          // MEJORA: Usar la misma lógica que EmployeesList.jsx
+          // Si tenemos el area_id del usuario, filtramos los empleados que coincidan.
+          // Como requests tiene 'employees' relation, podemos filtrar por area_id del cargo del empleado.
+          
+          // Sin embargo, requests.js hace un simple select.
+          // Vamos a aplicar el filtrado por sede/business_unit que ya existía, pero reforzado.
+          
+          if (user?.sede) {
+            filteredData = filteredData.filter(
+              (req) => req.employees?.sede === user.sede
+            )
+          }
+          if (user?.business_unit) {
+            filteredData = filteredData.filter(
+              (req) => req.employees?.business_unit === user.business_unit
+            )
+          }
+          
+          // TODO: Idealmente implementar get_requests_by_user_area RPC
       }
 
       setRequests(filteredData)

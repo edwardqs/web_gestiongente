@@ -167,9 +167,11 @@ export const AuthProvider = ({ children }) => {
                 };
             }
             
-            // Regla para JEFE DE RRHH / JEFE DE GENTE Y GESTIÓN
-            if (roleName === 'JEFE_RRHH' || employeeData.position?.includes('JEFE DE GENTE')) {
-                 console.log('⚡ ACCESO VIP DETECTADO: JEFE RRHH -> Permisos Totales');
+            // Regla para JEFE DE RRHH / JEFE DE GENTE Y GESTIÓN / GERENTE
+            if (roleName === 'JEFE_RRHH' || 
+                employeeData.position?.includes('JEFE DE GENTE') || 
+                employeeData.position?.includes('GERENTE')) {
+                 console.log('⚡ ACCESO VIP DETECTADO: JEFE/GERENTE -> Permisos Totales');
                  modulePermissions = { 
                     '*': { read: true, write: true, delete: true } 
                 };
@@ -185,6 +187,7 @@ export const AuthProvider = ({ children }) => {
           full_name: employeeData.full_name,
           position: employeeData.position,
           sede: employeeData.sede,
+          business_unit: employeeData.business_unit,
           profile: employeeData
         };
         console.log('Usuario Final Configurado:', finalUser);

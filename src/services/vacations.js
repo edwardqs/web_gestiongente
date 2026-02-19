@@ -3,10 +3,11 @@ import { supabase } from '../lib/supabase'
 /**
  * Obtiene el resumen de vacaciones (Kardex)
  */
-export const getVacationOverview = async (sede, search) => {
+export const getVacationOverview = async (sede, search, businessUnit) => {
     const { data, error } = await supabase.rpc('get_vacation_overview', {
         p_sede: sede || null,
-        p_search: search || null
+        p_search: search || null,
+        p_business_unit: businessUnit || null
     })
     return { data, error }
 }
