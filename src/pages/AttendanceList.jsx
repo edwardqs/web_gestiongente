@@ -261,6 +261,13 @@ export default function AttendanceList() {
                      allowedIds = new Set() // Sin acceso
                  }
             }
+            
+            // CORRECCIÓN FILTRO SUPERVISOR:
+            // Si el usuario es Supervisor (isBoss), el código anterior NO filtraba por sede/unidad.
+            // PERO si es Jefe de Área, debe poder ver su área en CUALQUIER sede.
+            // Por tanto, solo forzamos Sede si NO es Boss. Si es Boss, confiamos en el filtro de Área (allowedIds).
+            const shouldFilterBySede = !isGlobalAdmin && !isBoss && user?.sede;
+            const shouldFilterByUnit = !isGlobalAdmin && !isBoss && user?.business_unit;
 
             // Detectar si estamos viendo un solo día (modo reporte diario / Roster)
             // IMPORTANTE: Solo usar modo Roster si el filtro de estado es general
@@ -279,9 +286,11 @@ export default function AttendanceList() {
                 
                 // Si no es admin y no es jefe, optimizar restringiendo por Sede en RPC
                 // Si es Jefe, dejamos Sede abierta (null) y filtramos en memoria por Área
-                if (!isGlobalAdmin && !isBoss) {
-                    if (user?.sede) rpcSede = user.sede
-                    if (user?.business_unit) rpcBusinessUnit = user.business_unit
+                if (shouldFilterBySede) {
+                    rpcSede = user.sede
+                }
+                if (shouldFilterByUnit) {
+                    rpcBusinessUnit = user.business_unit
                 }
 
                 const { data: rpcData, error: rpcError } = await supabase.rpc('get_daily_attendance_report', {
@@ -519,6 +528,14 @@ export default function AttendanceList() {
                      if (allowedIds && allowedIds.size > 0) {
                           // Usar .in() para filtrar en la base de datos
                           query = query.in('employee_id', Array.from(allowedIds))
+                     } else if (shouldFilterBySede || shouldFilterByUnit) {
+                          // Fallback a filtro por Sede/Unidad
+                          if (shouldFilterBySede) {
+                              query = query.eq('employees.sede', user.sede)
+                          }
+                          if (shouldFilterByUnit) {
+                              query = query.eq('employees.business_unit', user.business_unit)
+                          }
                      } else if (isBoss) {
                           // Si es Jefe y allowedIds está vacío, significa que el RPC falló o no tiene gente.
                           // NO aplicar filtro de sede fallback, porque entonces vería ADM CENTRAL.
@@ -931,10 +948,10 @@ export default function AttendanceList() {
                     `)
 
                 if (!isGlobalAdmin) {
-                    if (user?.sede && !isBoss) {
+                    if (shouldFilterBySede) {
                         query = query.eq('employees.sede', user.sede)
                     }
-                    if (user?.business_unit) {
+                    if (shouldFilterByUnit) {
                         query = query.eq('employees.business_unit', user.business_unit)
                     }
                 }
@@ -969,10 +986,10 @@ export default function AttendanceList() {
 
                 // Filtrado de seguridad (igual que loadAttendances)
                 if (!isGlobalAdmin) {
-                    if (user?.sede && !isBoss) {
+                    if (shouldFilterBySede) {
                         exportData = exportData.filter(item => item.employees.sede === user.sede)
                     }
-                    if (user?.business_unit) {
+                    if (shouldFilterByUnit) {
                         exportData = exportData.filter(item => item.employees.business_unit === user.business_unit)
                     }
                 }
@@ -1543,11 +1560,11 @@ export default function AttendanceList() {
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[200px]">Empleado</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[300px]">Empleado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entrada</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[120px]">Estado</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[140px]">Tipo</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[160px]">Tipo</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Motivo</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Validado</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ubicación</th>
@@ -1556,7 +1573,7 @@ export default function AttendanceList() {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {attendances.map((attendance) => (
                                     <tr key={attendance.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 whitespace-nowrap max-w-[200px]">
+                                        <td className="px-6 py-4 whitespace-nowrap max-w-[300px]">
                                             <div className="truncate">
                                                 <div className="text-sm font-medium text-gray-900 truncate" title={attendance.employees?.full_name}>{attendance.employees?.full_name}</div>
                                                 <div className="text-sm text-gray-500 truncate" title={`${attendance.employees?.dni} • ${attendance.employees?.position}`}>{attendance.employees?.dni} • {attendance.employees?.position}</div>

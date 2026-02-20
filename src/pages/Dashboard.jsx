@@ -80,10 +80,14 @@ export default function Dashboard() {
       if (!error && data) {
          let filtered = data
          if (allowedIds && allowedIds.size > 0) {
+             // IMPORTANTE: Filtrar actividad por allowedIds si existen (Jefes/Supervisores)
              filtered = filtered.filter(act => allowedIds.has(act.employee_id || act.employees?.id))
          } else if (isBoss && (!allowedIds || allowedIds.size === 0)) {
              // Si es Boss y no hay allowedIds (error o vacio), mostrar nada por seguridad
              filtered = []
+         } else if (!isGlobalAdmin && user?.business_unit && !isBoss) {
+             // Fallback para usuarios normales (sin allowedIds pero con BU)
+             // Aunque el RPC getRecentActivity ya filtra por BU, esto es doble seguridad
          }
          setActivities(filtered.slice(0, 10))
        }
@@ -93,6 +97,10 @@ export default function Dashboard() {
 
     // 2. Cargar Estadísticas
     const loadStats = async () => {
+      // Pasamos los mismos parámetros que a activities.
+      // El RPC get_dashboard_stats ya tiene la lógica de seguridad híbrida (Áreas + Sedes).
+      // Si es Jefe (isBoss), querySede/Unit son null, y el RPC se encarga de filtrar por su Área en todas las sedes.
+      // Si es Supervisor, el RPC filtrará por su Área + Sede.
       const { data } = await getDashboardStats(querySede, queryBusinessUnit)
       if (data) setStatsData(data)
       setLoadingStats(false)

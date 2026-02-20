@@ -84,8 +84,15 @@ export const getRequests = async () => {
           dni,
           position,
           sede,
+          business_unit,
           profile_picture_url,
           email
+        ),
+        approver:employees!vacation_requests_validated_by_fkey (
+          full_name,
+          sede,
+          business_unit,
+          position
         )
       `)
       .order('created_at', { ascending: false })

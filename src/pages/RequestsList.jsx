@@ -73,6 +73,13 @@ export default function RequestsList() {
         userPosition.includes('GERENTE GENERAL') ||
         (user?.permissions && user?.permissions['*'])
       
+      const isBoss = userRole.includes('JEFE') || 
+                     userRole.includes('GERENTE') || 
+                     userPosition.includes('JEFE') || 
+                     userPosition.includes('GERENTE') ||
+                     userPosition.includes('COORDINADOR') ||
+                     userPosition.includes('SUPERVISOR');
+
       if (!isGlobalAdmin) {
           // Para usuarios no admin (incluyendo Jefes), usamos la lógica de Áreas
           // Obtenemos los empleados permitidos para este usuario
@@ -84,6 +91,16 @@ export default function RequestsList() {
           } else {
               // Si falla o no hay empleados, no mostrar nada por seguridad
               filteredData = []
+          }
+
+          // FILTRADO ESTRICTO ADICIONAL POR SEDE Y UNIDAD DE NEGOCIO
+          // Solo se aplica si NO es Jefe/Supervisor, ya que ellos deben ver toda su área (que puede ser multi-sede)
+          if (user?.sede && !isBoss) {
+              filteredData = filteredData.filter(req => req.employees?.sede === user.sede)
+          }
+
+          if (user?.business_unit && !isBoss) {
+              filteredData = filteredData.filter(req => req.employees?.business_unit === user.business_unit)
           }
       }
 
@@ -373,7 +390,27 @@ export default function RequestsList() {
                     </td>
 
                     {/* Estado */}
-                    <td className="px-6 py-4">{getStatusBadge(req.status)}</td>
+                    <td className="px-6 py-4">
+                      {getStatusBadge(req.status)}
+                      
+                      {/* Información de Aprobador (Para RRHH) */}
+                      {(req.status === 'APROBADO' || req.status === 'RECHAZADO') && req.approver && (
+                        <div className={`mt-2 text-[10px] p-2 rounded border leading-tight ${
+                          req.status === 'APROBADO' 
+                            ? 'bg-green-50 border-green-100 text-green-800' 
+                            : 'bg-red-50 border-red-100 text-red-800'
+                        }`}>
+                          <strong className="block mb-1 opacity-75">
+                            {req.status === 'APROBADO' ? 'APROBADO POR:' : 'RECHAZADO POR:'}
+                          </strong>
+                          <div className="font-medium">{req.approver.full_name}</div>
+                          <div className="opacity-75">
+                            {req.approver.sede} • {req.approver.business_unit || 'Sin Unidad'}
+                          </div>
+                          <div className="opacity-75 italic">{req.approver.position}</div>
+                        </div>
+                      )}
+                    </td>
 
                     {/* Acciones */}
                     <td className="px-6 py-4 text-right">

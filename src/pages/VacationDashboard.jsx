@@ -85,10 +85,11 @@ export default function VacationDashboard() {
         }
         
         // Si el usuario tiene restricciones, aplicarlas
-        // CORRECCIÓN: Si es Jefe (isBoss), NO forzar sede, permitir ver todas (empty string)
+        // CORRECCIÓN: Si es Jefe (isBoss), NO forzar sede ni business unit por defecto
         return {
             sede: (!isGlobalAdmin && !isBoss && user?.sede) ? user.sede : (savedFilters?.sede || ''),
-            businessUnit: (!isGlobalAdmin && user?.business_unit) ? user.business_unit : (savedFilters?.businessUnit || ''),
+            // Si es Jefe, businessUnit por defecto es VACÍO (ver todo su equipo), no su propia unidad
+            businessUnit: (!isGlobalAdmin && !isBoss && user?.business_unit) ? user.business_unit : (savedFilters?.businessUnit || ''),
             search: savedFilters?.search || '',
             status: savedFilters?.status || 'all'
         }
@@ -136,9 +137,10 @@ export default function VacationDashboard() {
                 setSelectedSede(user.sede)
             }
             
-            // CORRECCIÓN: Si es Jefe, NO forzar business unit. Dejar que use la del filtro guardado o ninguna
+            // CORRECCIÓN: Si es Jefe, NO forzar business unit. Dejar que use la del filtro guardado o ninguna (para ver toda su área)
             if (!isGlobalAdmin && !isBoss && user?.business_unit) {
-                setSelectedBusinessUnit(user.business_unit)
+                // Solo si NO es jefe forzamos la unidad. Si es jefe, lo dejamos libre.
+                // setSelectedBusinessUnit(user.business_unit) 
             }
         }
         fetchInitial()
@@ -168,10 +170,12 @@ export default function VacationDashboard() {
                 
                 if (!isGlobalAdmin && user?.business_unit) {
                     const buExists = data.some(bu => bu.name === user.business_unit)
-                    if (buExists) {
+                    if (buExists && !isBoss) { // Solo forzar si NO es jefe
                          if (currentSelection !== user.business_unit) {
                              setSelectedBusinessUnit(user.business_unit)
                          }
+                    } else if (isBoss) {
+                        // Si es jefe, no forzamos nada, permitimos selección libre
                     } else {
                         setSelectedBusinessUnit('')
                     }
@@ -215,6 +219,10 @@ export default function VacationDashboard() {
             let allowedIds = null;
             if (!isGlobalAdmin) {
                  const { data: allowedEmployees } = await supabase.rpc('get_employees_by_user_area')
+                 console.log('Total allowedEmployees:', allowedEmployees?.length)
+                 console.log('allowedEmployees IDs:', allowedEmployees?.map(e => e.id))
+                 console.log('Estructura de allowedEmployees[0]:', allowedEmployees?.[0])
+                 
                  if (allowedEmployees) {
                      allowedIds = new Set(allowedEmployees.map(e => e.id))
                  } else {
@@ -222,19 +230,31 @@ export default function VacationDashboard() {
                  }
             }
 
+            // CORRECCIÓN FILTRO SUPERVISOR:
+            // - Sede: Siempre estricto si no es Admin, EXCEPTO si es Jefe/Supervisor (usan lógica de Área/allowedIds)
+            // - Unidad: Relajado si es Jefe/Supervisor (usan lógica de Área/allowedIds)
+            const shouldFilterBySede = !isGlobalAdmin && !isBoss && user?.sede;
+            const shouldFilterByUnit = !isGlobalAdmin && !isBoss && user?.business_unit;
+
             // Pasamos queryBusinessUnit al servicio para filtrado server-side
             const { data, error } = await getVacationOverview(querySede, searchParam, queryBusinessUnit)
-            
+                    console.log('Empleados de RPC vacation_overview:', data?.length)
+                    console.log('Empleados después de allowedIds filter:', 
+                        data?.filter(emp => allowedIds ? allowedIds.has(emp.employee_id) : true).length
+                    )
             if (error) throw error
             
             let filteredResult = data || []
             
             // Si el RPC no soporta el filtro, o para asegurar consistencia UI, filtramos en memoria
-            // CORRECCIÓN: Si es Jefe, NO filtrar por business unit localmente, ya que el RPC ya trajo lo correcto por Área
-            if (queryBusinessUnit && !isBoss) {
-                filteredResult = filteredResult.filter(emp => 
-                    emp.business_unit === queryBusinessUnit
-                )
+            // CORRECCIÓN: Usar comparación flexible (lowercase y trim) para evitar discrepancias
+            if (shouldFilterBySede) {
+                const targetSede = user.sede.toUpperCase().trim();
+                filteredResult = filteredResult.filter(emp => emp.sede && emp.sede.toUpperCase().trim() === targetSede)
+            }
+            if (shouldFilterByUnit) {
+                const targetUnit = user.business_unit.toUpperCase().trim();
+                filteredResult = filteredResult.filter(emp => emp.business_unit && emp.business_unit.toUpperCase().trim() === targetUnit)
             }
             
             // FILTRADO POR ÁREA (Seguridad estricta)

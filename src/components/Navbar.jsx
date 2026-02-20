@@ -81,9 +81,31 @@ export default function Navbar({ setSidebarOpen, isCollapsed }) {
               <p className="text-sm font-bold text-gray-800 leading-tight">
                 {user?.full_name || 'Usuario'}
               </p>
-              <p className="text-xs text-blue-600 font-medium">
-                {user?.position || user?.role || 'Personal'}
-              </p>
+              
+              <div className="flex flex-wrap items-center justify-end gap-2 mt-1">
+                  <p className="text-xs text-blue-600 font-bold tracking-wide">
+                    {user?.position || user?.role || 'Personal'}
+                  </p>
+                  
+                  {/* Información Contextual: Sede / Unidad / Área */}
+                  {(user?.sede || user?.business_unit || user?.area_name) && (
+                    <div className="flex items-center gap-1.5 pl-2 border-l border-gray-300">
+                        {user?.sede && (
+                            <span className="text-[10px] font-bold text-slate-600">
+                                {user.sede}
+                            </span>
+                        )}
+                        {(user?.business_unit || user?.area_name) && (
+                            <>
+                                <span className="text-gray-300 text-[10px]">•</span>
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                    {[user?.business_unit, user?.area_name].filter(Boolean).join(' / ')}
+                                </span>
+                            </>
+                        )}
+                    </div>
+                  )}
+              </div>
             </div>
             
             <div className="relative">
@@ -120,6 +142,11 @@ export default function Navbar({ setSidebarOpen, isCollapsed }) {
                 <div className="px-4 py-3 border-b border-gray-100 mb-2 md:hidden">
                   <p className="font-bold text-gray-800">{user?.full_name}</p>
                   <p className="text-xs text-gray-500">{user?.email}</p>
+                  {(user?.sede || user?.business_unit) && (
+                      <p className="text-[10px] text-gray-400 mt-1">
+                          {[user?.sede, user?.business_unit].filter(Boolean).join(' • ')}
+                      </p>
+                  )}
                 </div>
 
                 <button 

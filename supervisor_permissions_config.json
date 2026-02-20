@@ -1,0 +1,33 @@
+{
+  "description": "Configuración de permisos para Jefes Inmediatos (Coordinadores y Supervisores)",
+  "target_roles": [
+    {
+      "role_name": "COORDINADOR",
+      "access_scope": "same_sede_and_business_unit",
+      "web_access": true,
+      "modules": [
+        { "key": "inicio", "can_read": true, "can_write": false },
+        { "key": "asistencia", "can_read": true, "can_write": true },
+        { "key": "solicitudes", "can_read": true, "can_write": true },
+        { "key": "vacaciones", "can_read": true, "can_write": true },
+        { "key": "calendario", "can_read": true, "can_write": false }
+      ]
+    },
+    {
+      "role_name": "SUPERVISOR",
+      "access_scope": "same_sede_and_business_unit",
+      "web_access": true,
+      "modules": [
+        { "key": "inicio", "can_read": true, "can_write": false },
+        { "key": "asistencia", "can_read": true, "can_write": true },
+        { "key": "solicitudes", "can_read": true, "can_write": true },
+        { "key": "vacaciones", "can_read": true, "can_write": true },
+        { "key": "calendario", "can_read": true, "can_write": false }
+      ]
+    }
+  ],
+  "approval_logic": {
+    "requirement": "Aprobación restringida por Sede y Unidad de Negocio",
+    "display_format": "APROBADO POR [NOMBRE] / [SEDE] / [UNIDAD] / [CARGO]"
+  }
+}

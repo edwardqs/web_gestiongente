@@ -1,9 +1,8 @@
 -- ==============================================================================
 -- FIX: DASHBOARD STATS - PRIORIDAD A SUPERVISORES
--- FECHA: 20/02/2026 - ACTUALIZADO AHORA MISMO
+-- FECHA: 20/02/2026
 -- CAMBIO: Se invierte el orden de evaluación para que SUPERVISOR tenga prioridad
 -- y se añaden roles explícitos.
--- VERSIÓN: 2.1 (Forzando actualización visual)
 -- ==============================================================================
 
 DROP FUNCTION IF EXISTS public.get_dashboard_stats(text, text);
