@@ -306,6 +306,12 @@ const CalendarRequests = () => {
                     
                     {daysCells.map(day => {
                         const dayRequests = getRequestsForDay(day)
+                        
+                        const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day)
+                        const today = new Date()
+                        today.setHours(0, 0, 0, 0)
+                        
+                        const isPast = cellDate < today
                         const isToday = 
                             day === new Date().getDate() && 
                             currentDate.getMonth() === new Date().getMonth() && 
@@ -352,7 +358,13 @@ const CalendarRequests = () => {
                                 <div className="flex flex-col gap-1 mt-1 flex-1">
                                     {visibleRequests.map(req => {
                                         const type = getRequestType(req.request_type)
-                                        const style = getColor(type)
+                                        let style = getColor(type)
+                                        
+                                        // Si el día ya pasó, mostramos en gris/transparente
+                                        if (isPast) {
+                                            style = 'bg-gray-100 text-gray-400 border-gray-200 opacity-70 grayscale'
+                                        }
+
                                         return (
                                             <div 
                                                 key={req.id} 

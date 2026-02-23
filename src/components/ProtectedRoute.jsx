@@ -40,18 +40,34 @@ export const ProtectedRoute = ({ module, requiredAction = 'read', children }) =>
       // Buscar permisos específicos o comodín '*'
       let modulePerms = perms[module] || perms['*'];
       
-      // --- EXCEPCIÓN PARA VACACIONES ---
-      // Si el módulo es 'vacations' y no tiene permiso explícito, pero es Analista/Jefe/Gerente, otorgar permiso de lectura
-      if (!modulePerms && (module === 'vacations' || module === 'dashboard')) {
+      // --- EXCEPCIÓN PARA VACACIONES, DASHBOARD Y EMPLEADOS ---
+      // Si el módulo es 'vacations', 'dashboard' o 'employees' y no tiene permiso explícito, 
+      // pero es Analista/Jefe/Gerente/Coordinador/Supervisor, otorgar permiso de lectura
+      if (!modulePerms && (module === 'vacations' || module === 'dashboard' || module === 'employees')) {
           const isAnalystOrBoss = user.role?.includes('ANALISTA') || 
                                   user.role?.includes('JEFE') || 
+                                  user.role?.includes('SUPERVISOR') ||
                                   user.position?.includes('ANALISTA') ||
                                   user.position?.includes('JEFE') ||
                                   user.position?.includes('GERENTE') ||
-                                  user.position?.includes('COORDINADOR');
+                                  user.position?.includes('COORDINADOR') ||
+                                  user.position?.includes('SUPERVISOR');
                                   
           if (isAnalystOrBoss) {
               modulePerms = { read: true, write: true, delete: false }; // Permiso por defecto
+          }
+      }
+
+      // --- EXCEPCIÓN PARA LIFECYCLE (ALTAS/BAJAS) ---
+      // Solo para RRHH y Gerencia
+      if (!modulePerms && module === 'lifecycle') {
+          const isHR = user.role === 'JEFE_RRHH' || 
+                       user.position?.includes('JEFE DE GENTE') ||
+                       user.position?.includes('ANALISTA DE GENTE') ||
+                       user.position?.includes('GERENTE');
+          
+          if (isHR) {
+              modulePerms = { read: true, write: true, delete: false };
           }
       }
 

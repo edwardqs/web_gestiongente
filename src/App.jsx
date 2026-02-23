@@ -13,11 +13,13 @@ import RolesManagement from './pages/RolesManagement'
 import PositionsManagement from './pages/PositionsManagement'
 import AreasManagement from './pages/AreasManagement'
 import MobileAccessConfig from './pages/MobileAccessConfig'
+import MyTeam from './pages/MyTeam'
 import VacationDashboard from './pages/VacationDashboard'
 import VacationExcelUpload from './pages/VacationExcelUpload'
 import ReportsCenter from './pages/ReportsCenter'
 import PapeletaVacaciones from './components/PapeletaVacaciones'
 import DashboardLayout from './layouts/DashboardLayout'
+import EmployeeLifecycle from './pages/EmployeeLifecycle'
 
 // Layout Wrapper para rutas privadas
 const PrivateLayout = () => {
@@ -72,6 +74,20 @@ function App() {
                 </ProtectedRoute>
               } />
 
+              {/* Nueva ruta unificada de Empleados */}
+              <Route path="/employees" element={
+                <ProtectedRoute module="employees">
+                  <EmployeesList />
+                </ProtectedRoute>
+              } />
+
+              {/* Nueva vista dedicada para "Mi Equipo" (Supervisores/Coordinadores) */}
+              <Route path="/my-team" element={
+                <ProtectedRoute module="employees">
+                  <MyTeam />
+                </ProtectedRoute>
+              } />
+
               <Route path="/employees/:sede" element={
                 <ProtectedRoute module="employees">
                   <EmployeesList />
@@ -82,6 +98,13 @@ function App() {
               <Route path="/attendance-list" element={
                 <ProtectedRoute module="attendance">
                   <AttendanceList />
+                </ProtectedRoute>
+              } />
+
+              {/* Nueva ruta de Gestión de Altas y Bajas */}
+              <Route path="/lifecycle" element={
+                <ProtectedRoute module="lifecycle">
+                  <EmployeeLifecycle />
                 </ProtectedRoute>
               } />
 

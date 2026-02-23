@@ -51,14 +51,16 @@ export default function Dashboard() {
                    userPosition.includes('COORDINADOR') ||
                    userPosition.includes('SUPERVISOR');
 
+    // Identificar Jefes Locales (Supervisores/Coordinadores) que deben ver solo su sede
+    const isLocalBoss = userPosition.includes('SUPERVISOR') || userPosition.includes('COORDINADOR');
+
     let querySede = null
     let queryBusinessUnit = null
     
     if (!isGlobalAdmin) {
-        if (user?.sede && !isBoss) querySede = user.sede
-        // OJO: Si es Boss, querySede se queda en null para traer todas las sedes
-        // queryBusinessUnit se usa si existe solo para NO jefes
-        if (user?.business_unit && !isBoss) queryBusinessUnit = user.business_unit
+        // Aplicar filtros si es empleado normal O si es un Jefe Local (Supervisor/Coord)
+        if (user?.sede && (!isBoss || isLocalBoss)) querySede = user.sede
+        if (user?.business_unit && (!isBoss || isLocalBoss)) queryBusinessUnit = user.business_unit
     }
 
     // 1. Cargar datos iniciales
@@ -82,8 +84,8 @@ export default function Dashboard() {
          if (allowedIds && allowedIds.size > 0) {
              // IMPORTANTE: Filtrar actividad por allowedIds si existen (Jefes/Supervisores)
              filtered = filtered.filter(act => allowedIds.has(act.employee_id || act.employees?.id))
-         } else if (isBoss && (!allowedIds || allowedIds.size === 0)) {
-             // Si es Boss y no hay allowedIds (error o vacio), mostrar nada por seguridad
+         } else if (!isGlobalAdmin && isBoss && (!allowedIds || allowedIds.size === 0)) {
+             // Si es Boss (NO ADMIN) y no hay allowedIds (error o vacio), mostrar nada por seguridad
              filtered = []
          } else if (!isGlobalAdmin && user?.business_unit && !isBoss) {
              // Fallback para usuarios normales (sin allowedIds pero con BU)

@@ -19,7 +19,8 @@ import {
   Plane,
   Clock,
   LayoutGrid,
-  Smartphone
+  Smartphone,
+  RefreshCw
 } from 'lucide-react'
 
 export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed }) {
@@ -53,7 +54,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
   // Configuración de menús (memoizada para performance)
   const menuItems = useMemo(() => {
     // Lógica para determinar el enlace de "Equipo/Empleados"
-    let employeesHref = '#'
+    let employeesHref = '/employees' // Por defecto lleva a la lista global
     let employeesLabel = 'Empleados'
     let showEmployeesMenu = true // Por defecto visible
     
@@ -78,17 +79,16 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     
     const shouldHideReports = isBoss && !isHRBoss && !isGlobalAdmin;
 
-    if (!isGlobalAdmin && user?.sede) {
-        employeesLabel = 'Mi Equipo'
-        // Normalizar sede para URL
-        const sedeSlug = user.sede.toLowerCase().replace('.', '').replace(/\s+/g, '-')
-        employeesHref = `/employees/${sedeSlug}`
-        
-        // Añadir business unit si existe
-        if (user?.business_unit) {
-            employeesHref += `?business=${user.business_unit.toLowerCase()}`
-        }
+    // Lógica para "Mi Equipo" (Empleados)
+    // JEFES y GERENTES deben tener acceso GLOBAL (ver todas las sedes) -> /employees
+    // SUPERVISORES, COORDINADORES y ANALISTAS -> /my-team (Nueva vista simplificada)
+    // Corrección: Supervisores y Coordinadores NO deben tener acceso global, deben ir a "Mi Equipo"
+    const hasGlobalTeamAccess = isGlobalAdmin || userRole.includes('JEFE') || userRole.includes('GERENTE') || userPosition.includes('JEFE') || userPosition.includes('GERENTE');
 
+    if (!hasGlobalTeamAccess) {
+        employeesLabel = 'Mi Equipo'
+        employeesHref = '/my-team'
+        
         // OCULTAR MENÚ PARA ANALISTAS DE GENTE Y GESTIÓN
         // Si es Analista y tiene sede asignada, se oculta 'Mi Equipo' porque ya usa 'Dptos / Sedes'
         // Se mantiene visible solo para Jefes Operativos (Ventas, Logística, etc.)
@@ -105,22 +105,27 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       href: '/', 
       module: 'dashboard' 
     },
-    // Solo agregar si debe mostrarse
-    /* COMENTADO POR SOLICITUD DE USUARIO (EMPLEADOS)
-    ...(showEmployeesMenu ? [{ 
+    ...((showEmployeesMenu) ? [{ 
       id: 'employees',
       icon: Users, 
       label: employeesLabel, 
       href: employeesHref, 
       module: 'employees' 
     }] : []),
-    */
     { 
       id: 'attendance',
       icon: Clock, 
       label: 'Asistencias', 
       href: '/attendance-list', 
       module: 'attendance' 
+    },
+    // Nuevo Módulo: Gestión de Altas y Bajas (Solo RRHH)
+    {
+      id: 'lifecycle',
+      icon: RefreshCw,
+      label: 'Gestión Altas/Bajas',
+      href: '/lifecycle',
+      module: 'lifecycle' // Requiere permiso especial o ser Admin/RRHH
     },
     // Ocultar Reportes si corresponde
     ...(!shouldHideReports ? [{
@@ -223,26 +228,52 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
   return items
   }, [user])
 
-  // Función recursiva para encontrar si un item está activo
+  // Función recursiva mejorada para encontrar el item más específico (Best Match)
   const findActiveMenuItem = useCallback((items, path, search) => {
-    for (const item of items) {
-      if (item.href && item.href !== '#') {
-        const [targetPath, targetQuery] = item.href.split('?')
-        const isPathMatch = path === targetPath || (targetPath !== '/' && path.startsWith(targetPath))
+    let bestMatch = null
+    let maxLen = -1
+
+    const traverse = (itemList) => {
+      for (const item of itemList) {
+        // Verificar enlace directo
+        if (item.href && item.href !== '#') {
+          const [targetPath, targetQuery] = item.href.split('?')
+          
+          // Coincidencia exacta o prefijo (excluyendo raíz '/')
+          const isPathMatch = path === targetPath || (targetPath !== '/' && path.startsWith(targetPath))
+          
+          if (isPathMatch) {
+            // Si el target tiene query params, deben estar presentes en la URL actual
+            if (targetQuery && !search.includes(targetQuery)) {
+              // No coincide query param requerido
+            } else {
+              // Coincidencia válida - Guardar si es más específica (href más largo)
+              // Priorizamos rutas con query params para mayor especificidad
+              const score = item.href.length
+              if (score > maxLen) {
+                maxLen = score
+                bestMatch = item.id
+              }
+            }
+          }
+        }
         
-        if (isPathMatch) {
-          if (targetQuery && !search.includes(targetQuery)) continue
-          return item.id
+        // Verificar submenús recursivamente
+        if (item.submenu) {
+          traverse(item.submenu)
         }
       }
-      
-      if (item.submenu) {
-        const found = findActiveMenuItem(item.submenu, path, search)
-        if (found) return found
-      }
     }
-    return null
+
+    traverse(items)
+    return bestMatch
   }, [])
+
+  // Calcular el ID del item activo (Best Match)
+  const activeItemId = useMemo(() => 
+    findActiveMenuItem(menuItems, location.pathname, location.search),
+    [findActiveMenuItem, menuItems, location.pathname, location.search]
+  )
 
   // Función para expandir automáticamente el menú activo
   const expandActiveMenus = useCallback(() => {
@@ -333,15 +364,17 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       let hasModuleAccess = isAdmin || !item.module || 
                              (user?.permissions && user?.permissions[item.module]?.read)
 
-      // 2. CORRECCIÓN ESPECÍFICA PARA VACACIONES (Analistas y Jefes deben ver)
-      // Si el módulo es 'vacations' y no tiene permiso explícito pero es Analista/Jefe, dar acceso
-      if (item.module === 'vacations' && !hasModuleAccess) {
+      // 2. CORRECCIÓN ESPECÍFICA PARA VACACIONES Y EMPLEADOS (Analistas, Jefes y Supervisores deben ver)
+      // Si el módulo es 'vacations' o 'employees' y no tiene permiso explícito pero es Analista/Jefe/Supervisor, dar acceso
+      if ((item.module === 'vacations' || item.module === 'employees') && !hasModuleAccess) {
           const isAnalystOrBoss = user?.role?.includes('ANALISTA') || 
                                   user?.role?.includes('JEFE') || 
+                                  user?.role?.includes('SUPERVISOR') ||
                                   user?.position?.includes('ANALISTA') ||
                                   user?.position?.includes('JEFE') ||
                                   user?.position?.includes('GERENTE') ||
-                                  user?.position?.includes('COORDINADOR');
+                                  user?.position?.includes('COORDINADOR') ||
+                                  user?.position?.includes('SUPERVISOR');
                                   
           if (isAnalystOrBoss) hasModuleAccess = true;
       }
@@ -350,31 +383,73 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
       // Filtrado especial para departamentos
       if (item.module === 'departments' && !isAdmin && user?.sede) {
-        // --- MODIFICACIÓN IMPORTANTE: PERMITIR VER TODAS LAS SEDES A JEFES/GERENTES ---
-        // Si el usuario es Jefe o Gerente (aunque tenga sede asignada como ADM. CENTRAL),
-        // debe poder ver TODAS las sedes para gestionar su personal en esas ubicaciones.
-        // Solo aplicamos el filtro estricto si NO es un rol de jefatura.
-        
-        const isBoss = user?.role?.includes('JEFE') || 
-                       user?.role?.includes('GERENTE') || 
-                       user?.position?.includes('JEFE') || 
-                       user?.position?.includes('GERENTE') ||
-                       user?.position?.includes('COORDINADOR'); // Coordinadores también suelen ser regionales
+          // --- OPTIMIZACIÓN DE NAVEGACIÓN POR SEDE Y ROL ---
+          // Implementación de filtrado dinámico y permisos por ubicación
+          
+          // 1. Definir roles con acceso global explícito (además de Admins)
+          // Gerente General y TODOS los Jefes deben ver todo.
+          // Solo restringimos a Coordinadores y Supervisores.
+          const isBoss = user?.role?.includes('JEFE') || 
+                         user?.role?.includes('GERENTE') || 
+                         user?.position?.includes('JEFE') || 
+                         user?.position?.includes('GERENTE');
 
-        if (!isBoss) {
-            const newItem = { ...item }
-            if (newItem.submenu) {
-              newItem.submenu = newItem.submenu.filter(sub => 
-                sub.label.toUpperCase() === user.sede.toUpperCase()
-              )
-            }
-            if (!newItem.submenu || newItem.submenu.length > 0) {
-              acc.push(newItem)
-            }
-        } else {
-            // Si es Jefe, lo dejamos pasar completo (todas las sedes)
-            acc.push(item)
-        }
+          const hasGlobalAccess = isBoss || user?.position?.includes('GERENTE GENERAL');
+
+          if (!hasGlobalAccess) {
+              // Si NO es Jefe/Gerente (es decir, es Supervisor, Coordinador o Analista), aplicamos filtros
+              // Normalizar sedes del usuario (soporte para múltiples sedes separadas por coma)
+              const userSedes = user.sede.split(',').map(s => s.trim().toUpperCase());
+              const userUnit = user.business_unit ? user.business_unit.toUpperCase() : null;
+
+              const newItem = { ...item };
+              
+              if (newItem.submenu) {
+                  // 2. Filtrar Nivel 1 (Sedes/Ciudades)
+                  // Muestra solo las sedes que coinciden con la asignación del usuario
+                  newItem.submenu = newItem.submenu.filter(cityItem => {
+                      const cityLabel = cityItem.label.toUpperCase();
+                      // Lógica de coincidencia flexible
+                      return userSedes.some(us => 
+                          us === cityLabel || 
+                          us.includes(cityLabel) || 
+                          cityLabel.includes(us)
+                      );
+                  });
+
+                  // 3. Filtrar Nivel 2 (Unidades de Negocio)
+                  // Si el usuario tiene una Unidad de Negocio específica asignada, filtramos los subitems
+                  if (userUnit) {
+                      newItem.submenu = newItem.submenu.map(cityItem => {
+                          if (cityItem.submenu && cityItem.submenu.length > 0) {
+                              const filteredSub = cityItem.submenu.filter(unitItem => {
+                                  const unitLabel = unitItem.label.toUpperCase();
+                                  return unitLabel === userUnit || unitLabel.includes(userUnit) || userUnit.includes(unitLabel);
+                              });
+                              
+                              // Si encontramos coincidencias de unidad, restringimos la vista
+                              if (filteredSub.length > 0) {
+                                  return { ...cityItem, submenu: filteredSub };
+                              }
+                          }
+                          return cityItem;
+                      });
+                  }
+              }
+
+              // 4. Validación Final
+              // Solo mostrar el módulo si quedó alguna opción visible tras el filtrado
+              if (newItem.submenu && newItem.submenu.length > 0) {
+                  // Indicador visual de sede activa en el menú
+                  newItem.label = `Dptos / Sedes`; 
+                  // Podríamos añadir user.sede aquí, pero si es largo rompe el diseño.
+                  // Usaremos un indicador de "Filtrado" implícito al ver solo lo suyo.
+                  acc.push(newItem);
+              }
+          } else {
+              // Acceso Global para Gerencia General
+              acc.push(item);
+          }
       } else {
         acc.push(item)
       }
@@ -478,6 +553,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
                 isCollapsed={isCollapsed}
                 location={location}
                 isMobile={isMobile}
+                activeItemId={activeItemId}
               />
             ))}
           </nav>
@@ -501,28 +577,14 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 }
 
 // Componente MenuItem extraído para evitar re-renderizados innecesarios
-const MenuItem = ({ item, level = 0, parentId = null, expandedMenus, toggleMenu, handleNavigation, isCollapsed, location, isMobile }) => {
+const MenuItem = ({ item, level = 0, parentId = null, expandedMenus, toggleMenu, handleNavigation, isCollapsed, location, isMobile, activeItemId }) => {
   const hasSubmenu = item.submenu && item.submenu.length > 0
   const levelKey = `level${level}`
   const isExpanded = expandedMenus[levelKey] === item.id
   const Icon = item.icon
 
-  // Verificar si está activo
-  const isActive = useMemo(() => {
-    if (hasSubmenu || !item.href || item.href === '#') return false
-    
-    const [targetPath, targetQuery] = item.href.split('?')
-    const currentPath = location.pathname
-    
-    const isPathMatch = currentPath === targetPath || 
-                       (targetPath !== '/' && currentPath.startsWith(targetPath))
-    
-    if (targetQuery && isPathMatch) {
-      return location.search.includes(targetQuery)
-    }
-    
-    return isPathMatch
-  }, [hasSubmenu, item.href, location.pathname, location.search])
+  // Verificar si está activo (Usando el cálculo del padre para consistencia)
+  const isActive = activeItemId === item.id
 
   // Estilos dinámicos
   const paddingLeft = level === 0 ? 'px-3' : level === 1 ? 'pl-6 pr-3' : 'pl-10 pr-3'
@@ -655,6 +717,7 @@ const MenuItem = ({ item, level = 0, parentId = null, expandedMenus, toggleMenu,
               isCollapsed={isCollapsed}
               location={location}
               isMobile={isMobile}
+              activeItemId={activeItemId}
             />
           ))}
         </div>
