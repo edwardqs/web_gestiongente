@@ -1,8 +1,9 @@
-﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
-import { getLocations, getDepartmentsByLocation, getPositionsByLocationAndDept } from '../services/structure'
+import { getSedes, getOrganizationStructure } from '../services/organization'
+import { getPositionsByLocationAndDept } from '../services/structure' // Mantenemos positions legacy por ahora o migramos después
 import { Save, User, Phone, Mail, MapPin, Briefcase, Calendar, FileText, Store, Users } from 'lucide-react'
 
 export default function RegisterEmployee() {
@@ -116,43 +117,73 @@ export default function RegisterEmployee() {
     }
   }, [isEditing, isSedeLocked, user])
 
-  // 1. Cargar Sedes (Locations) al inicio
+  // 1. Cargar Sedes y Estructura Organizacional
   useEffect(() => {
-    const fetchLocations = async () => {
-        const { data } = await getLocations()
-        if (data) setLocationsList(data)
+    const fetchData = async () => {
+        try {
+            // Cargar Sedes
+            const { data: sedesData } = await getSedes()
+            if (sedesData) setLocationsList(sedesData)
+
+            // Cargar Estructura para filtrar unidades
+            const { data: structureData } = await getOrganizationStructure()
+            // Guardamos la estructura global en una referencia o estado si es necesario
+            // Para simplificar, usaremos esto directamente en el efecto de cambio de sede
+            if (structureData) {
+                window._orgStructure = structureData // Hack temporal o usar estado
+            }
+        } catch (error) {
+            console.error("Error loading structure:", error)
+        }
     }
-    fetchLocations()
+    fetchData()
   }, [])
 
-  // 2. Cargar Departamentos cuando cambia la Sede (o al cargar datos)
+  // 2. Cargar Unidades (Departments) cuando cambia la Sede
   useEffect(() => {
     if (formData.sede && locationsList.length > 0) {
         const selectedLoc = locationsList.find(l => l.name === formData.sede)
+        
         if (selectedLoc) {
             // Actualizar ID si no está
-            if (!formData.location_id) {
+            if (!formData.location_id || formData.location_id !== selectedLoc.id) {
                 setFormData(prev => ({ ...prev, location_id: selectedLoc.id }))
             }
-            // Cargar departamentos
-            getDepartmentsByLocation(selectedLoc.id).then(({ data }) => {
-                if (data) {
-                    setDepartmentsList(data)
 
-                    // Auto-asignar "OPL" por defecto si existe y es la única opción
-                    if (!formData.business_unit) {
-                        const oplDept = data.find(d => d.name === 'OPL')
-                        // Solo auto-asignar si OPL existe Y es la única opción disponible
-                        if (oplDept && data.length === 1) {
-                             setFormData(prev => ({
-                                ...prev,
-                                business_unit: 'OPL',
-                                department_id: oplDept.id
-                            }))
-                        }
+            // Filtrar Unidades Disponibles usando la Estructura
+            const fetchUnits = async () => {
+                let structureData = window._orgStructure
+                if (!structureData) {
+                    const { data } = await getOrganizationStructure()
+                    structureData = data
+                    window._orgStructure = data
+                }
+
+                if (structureData) {
+                    // Filtrar unidades asociadas a esta sede
+                    const availableUnits = structureData
+                        .filter(item => item.sedes?.id === selectedLoc.id && item.business_units)
+                        .map(item => ({
+                            id: item.business_units.id,
+                            name: item.business_units.name
+                        }))
+                    
+                    // Eliminar duplicados si los hubiera
+                    const uniqueUnits = [...new Map(availableUnits.map(item => [item['id'], item])).values()]
+                    
+                    setDepartmentsList(uniqueUnits)
+
+                    // Auto-asignar si solo hay una opción
+                    if (uniqueUnits.length === 1 && !formData.business_unit) {
+                         setFormData(prev => ({
+                            ...prev,
+                            business_unit: uniqueUnits[0].name,
+                            department_id: uniqueUnits[0].id
+                        }))
                     }
                 }
-            })
+            }
+            fetchUnits()
         }
     } else {
         setDepartmentsList([])

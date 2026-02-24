@@ -221,6 +221,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         { id: 'set-roles', label: 'Usuarios y Permisos', icon: Shield, href: '/roles' },
         { id: 'set-positions', label: 'Gestión de Cargos', icon: Briefcase, href: '/positions' },
         { id: 'set-areas', label: 'Gestión de Áreas', icon: LayoutGrid, href: '/areas' },
+        { id: 'org-structure', label: 'Estructura Organizacional', icon: LayoutGrid, href: '/organization-structure' },
         { id: 'set-mobile-access', label: 'Acceso App Móvil', icon: Smartphone, href: '/mobile-access-config' }
       ]
     },

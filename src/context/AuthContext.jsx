@@ -136,6 +136,16 @@ export const AuthProvider = ({ children }) => {
       /* Bloque anterior reemplazado por la lógica de arriba más robusta */
 
       if (employeeData) {
+        // VALIDACIÓN DE USUARIO ACTIVO (NUEVO)
+        if (employeeData.is_active === false) {
+            console.error('Acceso denegado: Usuario inactivo (Baja)');
+            alert('Tu cuenta ha sido desactivada. Contacta a RRHH.');
+            await supabase.auth.signOut();
+            setUser(null);
+            setSession(null);
+            return;
+        }
+
         // VALIDACIÓN DE ACCESO WEB
         // Si tiene un rol asignado y ese rol tiene web_access = false, denegar acceso
         if (employeeData.roles && employeeData.roles.web_access === false) {

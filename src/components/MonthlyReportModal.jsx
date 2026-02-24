@@ -81,12 +81,14 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
                 const monthMap = {
                   'January': 'Ene', 'February': 'Feb', 'March': 'Mar', 'April': 'Abr', 'May': 'May', 'June': 'Jun',
                   'July': 'Jul', 'August': 'Ago', 'September': 'Sep', 'October': 'Oct', 'November': 'Nov', 'December': 'Dic',
-                  'Jan': 'Ene', 'Feb': 'Feb', 'Mar': 'Mar', 'Apr': 'Abr', 'May': 'May', 'Jun': 'Jun',
-                  'Jul': 'Jul', 'Aug': 'Ago', 'Sep': 'Sep', 'Oct': 'Oct', 'Nov': 'Nov', 'Dec': 'Dic'
+                  'Jan': 'Ene', 'Feb': 'Feb', 'Mar': 'Mar', 'Apr': 'Abr', 'Jun': 'Jun',
+                  'Jul': 'Jul', 'Aug': 'Ago', 'Sep': 'Sep', 'Oct': 'Oct', 'Nov': 'Nov', 'Dec': 'Dic',
+                  '1': 'Ene', '2': 'Feb', '3': 'Mar', '4': 'Abr', '5': 'May', '6': 'Jun',
+                  '7': 'Jul', '8': 'Ago', '9': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dic'
                 }
                 const translatedHires = (data.hires_trend || []).map(item => ({
                     ...item,
-                    name: monthMap[item.name] || monthMap[item.name.substring(0,3)] || item.name // Traducir si existe, intentar substring
+                    name: monthMap[item.name] || (typeof item.name === 'string' ? monthMap[item.name.substring(0,3)] : null) || item.name // Traducir si existe, intentar substring
                 }))
                 
                 setMetrics({ ...data, hires_trend: translatedHires })
