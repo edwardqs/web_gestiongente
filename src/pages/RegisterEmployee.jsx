@@ -1,4 +1,4 @@
-﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
@@ -268,7 +268,7 @@ export default function RegisterEmployee() {
       setFormData(prev => ({ 
         ...prev, 
         sede: value,
-        location_id: selectedLoc ? selectedLoc.id : null,
+        location_id: selectedLoc ? selectedLoc.id : null, // Mantenemos location_id para compatibilidad con backend
         business_unit: '', // Reset negocio
         department_id: null,
         position: '', // Reset puesto
@@ -280,7 +280,7 @@ export default function RegisterEmployee() {
       setFormData(prev => ({ 
         ...prev, 
         business_unit: value,
-        department_id: selectedDept ? selectedDept.id : null,
+        department_id: selectedDept ? selectedDept.id : null, // Mantenemos department_id para compatibilidad
         position: '', // Reset puesto
         job_position_id: null,
         role_id: ''
@@ -320,6 +320,10 @@ export default function RegisterEmployee() {
         ...formData,
         full_name: formData.full_name?.toUpperCase(),
         address: formData.address?.toUpperCase(),
+        // IMPORTANT: Eliminamos IDs auxiliares que no son columnas en la tabla employees actual
+        // Si la tabla employees no tiene location_id/department_id, esto causaría error silencioso o explícito
+        location_id: undefined, 
+        department_id: undefined,
         role_id: null // Forzamos null en role_id para evitar conflictos de Foreign Key con la tabla 'roles'
       }
       
