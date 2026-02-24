@@ -1,9 +1,9 @@
-﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react'
+﻿﻿﻿﻿import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { createEmployee, getEmployeeById, updateEmployee } from '../services/employees'
 import { getSedes, getOrganizationStructure } from '../services/organization'
-import { getPositionsByLocationAndDept } from '../services/structure' // Mantenemos positions legacy por ahora o migramos después
+import { getPositions } from '../services/positions'
 import { Save, User, Phone, Mail, MapPin, Briefcase, Calendar, FileText, Store, Users } from 'lucide-react'
 
 export default function RegisterEmployee() {
@@ -190,22 +190,18 @@ export default function RegisterEmployee() {
     }
   }, [formData.sede, locationsList])
 
-  // 3. Cargar Posiciones cuando cambia Departamento (o al cargar datos)
+  // 3. Cargar Posiciones (Carga todas las disponibles por ahora)
   useEffect(() => {
-    if (formData.location_id && formData.business_unit && departmentsList.length > 0) {
-        const selectedDept = departmentsList.find(d => d.name === formData.business_unit)
-        if (selectedDept) {
-             if (!formData.department_id) {
-                setFormData(prev => ({ ...prev, department_id: selectedDept.id }))
-             }
-             getPositionsByLocationAndDept(formData.location_id, selectedDept.id).then(({ data }) => {
-                 if (data) setPositionsList(data)
-             })
-        }
+    if (formData.business_unit) {
+         // Cargamos todos los cargos disponibles
+         // TODO: Filtrar por Unidad de Negocio cuando se establezca la relación en la BD
+         getPositions().then(({ data }) => {
+             if (data) setPositionsList(data)
+         })
     } else {
         setPositionsList([])
     }
-  }, [formData.location_id, formData.business_unit, departmentsList])
+  }, [formData.business_unit])
 
 
   // Cargar datos si estamos en modo edición
