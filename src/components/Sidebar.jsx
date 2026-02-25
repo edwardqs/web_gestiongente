@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { getOrganizationStructure } from '../services/organization'
 import {
+  UserPlus,
   Users,
   Home,
   Settings,
@@ -36,6 +38,62 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
   
   // Detectar si estamos en móvil
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024)
+  
+  // Estado para el menú dinámico de estructura
+  const [structureMenu, setStructureMenu] = useState([])
+
+  // Cargar estructura dinámica para el menú
+  useEffect(() => {
+    const fetchStructure = async () => {
+        try {
+            const { data } = await getOrganizationStructure()
+            if (data) {
+                // Agrupar por Sede
+                const grouped = {}
+                data.forEach(item => {
+                    if (!item.sedes?.name || !item.business_units?.name) return
+                    const sedeName = item.sedes.name
+                    const unitName = item.business_units.name
+                    
+                    if (!grouped[sedeName]) {
+                        grouped[sedeName] = []
+                    }
+                    // Evitar duplicados
+                    if (!grouped[sedeName].includes(unitName)) {
+                        grouped[sedeName].push(unitName)
+                    }
+                })
+
+                // Convertir a formato de menú
+                const dynamicMenu = Object.keys(grouped).sort().map((sedeName, index) => {
+                    // Slug simple para IDs
+                    const sedeSlug = sedeName.toLowerCase().replace(/\s+/g, '-')
+                    
+                    return {
+                        id: `dept-${sedeSlug}-${index}`,
+                        label: sedeName,
+                        icon: MapPin,
+                        // Si la sede tiene unidades, crear submenú
+                        submenu: grouped[sedeName].sort().map((unitName, uIndex) => {
+                            const unitSlug = unitName.toLowerCase().replace(/\s+/g, '-')
+                            return {
+                                id: `unit-${sedeSlug}-${unitSlug}-${uIndex}`,
+                                label: unitName,
+                                icon: Store,
+                                href: `/employees/${sedeName}?business=${unitName}`
+                            }
+                        })
+                    }
+                })
+                
+                setStructureMenu(dynamicMenu)
+            }
+        } catch (err) {
+            console.error("Error loading sidebar structure:", err)
+        }
+    }
+    fetchStructure()
+  }, [])
   
   useEffect(() => {
     const handleResize = () => {
@@ -97,7 +155,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         }
     }
 
-    const items = [
+  const items = [
     { 
       id: 'home',
       icon: Home, 
@@ -166,40 +224,9 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
       label: 'Dptos / Sedes',
       href: '#',
       module: 'departments',
-      submenu: [
-        { id: 'dept-central', label: 'ADM. CENTRAL', icon: Building2, href: '/employees/adm-central' },
-        {
-          id: 'dept-trujillo',
-          label: 'Trujillo',
-          icon: MapPin,
-          submenu: [
-            { id: 'truj-snacks', label: 'Snacks', icon: Store, href: '/employees/trujillo?business=snacks' },
-            { id: 'truj-opl', label: 'OPL', icon: Store, href: '/employees/trujillo?business=opl' }
-          ]
-        },
-        {
-          id: 'dept-chimbote',
-          label: 'Chimbote',
-          icon: MapPin,
-          submenu: [
-            { id: 'chim-bebidas', label: 'Bebidas', icon: Store, href: '/employees/chimbote?business=bebidas' },
-            { id: 'chim-snacks', label: 'Snacks', icon: Store, href: '/employees/chimbote?business=snacks' }
-          ]
-        },
-        {
-          id: 'dept-huaraz',
-          label: 'Huaraz',
-          icon: MapPin,
-          submenu: [
-            { id: 'huar-bebidas', label: 'Bebidas', icon: Store, href: '/employees/huaraz?business=bebidas' },
-            { id: 'huar-purina', label: 'Purina', icon: Store, href: '/employees/huaraz?business=purina' }
-          ]
-        },
-        { id: 'dept-huacho', label: 'Huacho', icon: MapPin, href: '/employees/huacho' },
-        { id: 'dept-chincha', label: 'Chincha', icon: MapPin, href: '/employees/chincha' },
-        { id: 'dept-ica', label: 'Ica', icon: MapPin, href: '/employees/ica' },
-        { id: 'dept-desaguadero', label: 'Desaguadero', icon: MapPin, href: '/employees/desaguadero' },
-        { id: 'dept-lima', label: 'Lima', icon: MapPin, href: '/employees/lima' },
+      submenu: structureMenu.length > 0 ? structureMenu : [
+        // Fallback temporal mientras carga o si falla
+        { id: 'dept-loading', label: 'Cargando...', icon: Clock, href: '#' }
       ]
     },
     /* COMENTADO POR SOLICITUD DE USUARIO (DOCUMENTOS)
@@ -227,7 +254,7 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     },
   ]
   return items
-  }, [user])
+  }, [user, structureMenu])
 
   // Función recursiva mejorada para encontrar el item más específico (Best Match)
   const findActiveMenuItem = useCallback((items, path, search) => {

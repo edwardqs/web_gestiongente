@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { getVacationOverview } from '../services/vacations'
-import { getLocations, getDepartmentsByLocation } from '../services/structure'
+import { getSedes, getOrganizationStructure } from '../services/organization'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import VacationCalendar from '../components/VacationCalendar'
@@ -18,6 +18,7 @@ export default function VacationDashboard() {
     const [employees, setEmployees] = useState([])
     const [loading, setLoading] = useState(true)
     const [sedes, setSedes] = useState([])
+    const [structureData, setStructureData] = useState([])
     const [businessUnits, setBusinessUnits] = useState([])
     
     // Helper para determinar si el usuario es admin global
@@ -127,9 +128,14 @@ export default function VacationDashboard() {
     // 1. Cargar datos iniciales
     useEffect(() => {
         const fetchInitial = async () => {
-            const { data: locs } = await getLocations()
-            if (locs) {
-                setSedes(locs)
+            try {
+                const { data: locs } = await getSedes()
+                if (locs) setSedes(locs)
+
+                const { data: struct } = await getOrganizationStructure()
+                if (struct) setStructureData(struct)
+            } catch (err) {
+                console.error("Error loading initial data:", err)
             }
 
             // CORRECCIÓN: Si es Jefe, NO forzar sede. Dejar en blanco (todas)
@@ -148,53 +154,45 @@ export default function VacationDashboard() {
 
     // 2. Cargar Business Units cuando cambia la sede seleccionada
     useEffect(() => {
-        let isMounted = true
-
-        const fetchBusinessUnits = async () => {
-            if (!selectedSede) {
-                setBusinessUnits([])
-                return
-            }
-
-            const sedeObj = sedes.find(s => s.name === selectedSede)
-            if (!sedeObj) return
-
-            const currentSelection = selectedBusinessUnit 
-
-            const { data, error } = await getDepartmentsByLocation(sedeObj.id)
-            
-            if (error) console.error("Error cargando unidades de negocio:", error)
-            
-            if (isMounted && data) {
-                setBusinessUnits(data)
-                
-                if (!isGlobalAdmin && user?.business_unit) {
-                    const buExists = data.some(bu => bu.name === user.business_unit)
-                    if (buExists && !isBoss) { // Solo forzar si NO es jefe
-                         if (currentSelection !== user.business_unit) {
-                             setSelectedBusinessUnit(user.business_unit)
-                         }
-                    } else if (isBoss) {
-                        // Si es jefe, no forzamos nada, permitimos selección libre
-                    } else {
-                        setSelectedBusinessUnit('')
-                    }
-                } else {
-                    const selectionStillValid = currentSelection && data.some(bu => bu.name === currentSelection)
-                    
-                    if (!selectionStillValid && currentSelection) {
-                        setSelectedBusinessUnit('')
-                    }
-                }
-            }
+        if (!selectedSede) {
+            setBusinessUnits([])
+            return
         }
+
+        const sedeObj = sedes.find(s => s.name === selectedSede)
+        if (!sedeObj) return
+
+        const currentSelection = selectedBusinessUnit 
+
+        // Filtrar unidades usando la estructura organizacional (Nueva Lógica)
+        const units = structureData
+            .filter(item => item.sedes?.id === sedeObj.id && item.business_units)
+            .map(item => item.business_units)
+            // Eliminar duplicados
+            .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+            .sort((a, b) => a.name.localeCompare(b.name))
+
+        setBusinessUnits(units)
         
-        if (sedes.length > 0) {
-            fetchBusinessUnits()
+        if (!isGlobalAdmin && user?.business_unit) {
+            const buExists = units.some(bu => bu.name === user.business_unit)
+            if (buExists && !isBoss) { // Solo forzar si NO es jefe
+                    if (currentSelection !== user.business_unit) {
+                        setSelectedBusinessUnit(user.business_unit)
+                    }
+            } else if (isBoss) {
+                // Si es jefe, no forzamos nada, permitimos selección libre
+            } else {
+                setSelectedBusinessUnit('')
+            }
+        } else {
+            const selectionStillValid = currentSelection && units.some(bu => bu.name === currentSelection)
+            
+            if (!selectionStillValid && currentSelection) {
+                setSelectedBusinessUnit('')
+            }
         }
-
-        return () => { isMounted = false }
-    }, [selectedSede, sedes, isGlobalAdmin, user?.business_unit])
+    }, [selectedSede, sedes, structureData, isGlobalAdmin, user?.business_unit])
 
     // 3. Cargar empleados cuando cambian filtros relevantes
     useEffect(() => {

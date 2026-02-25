@@ -298,18 +298,56 @@ export default function EmployeeLifecycle() {
                     </td>
                     {activeTab === 'bajas' && (
                       <td className="px-6 py-4">
-                        <p className="text-sm text-gray-700 max-w-[200px] truncate" title={emp.termination_reason}>
-                          {emp.termination_reason || 'Sin motivo'}
-                        </p>
+                        {(() => {
+                            const reason = emp.termination_reason || ''
+                            const typeMatch = reason.match(/^\[(.*?)\]\s*(.*)/)
+                            const type = emp.termination_type || (typeMatch ? typeMatch[1] : 'BAJA')
+                            const detail = typeMatch ? typeMatch[2] : reason
+
+                            let badgeColor = 'bg-gray-100 text-gray-600'
+                            if (type === 'RENUNCIA') badgeColor = 'bg-blue-50 text-blue-600 border-blue-100'
+                            if (type === 'TERMINO_CONTRATO') badgeColor = 'bg-purple-50 text-purple-600 border-purple-100'
+                            if (type === 'PERIODO_PRUEBA') badgeColor = 'bg-indigo-50 text-indigo-600 border-indigo-100'
+                            if (type === 'MUTUO_DISENSO') badgeColor = 'bg-pink-50 text-pink-600 border-pink-100'
+                            if (type === 'ABANDONO_TRABAJO') badgeColor = 'bg-orange-50 text-orange-600 border-orange-100'
+                            if (type === 'NO_RENOVACION') badgeColor = 'bg-yellow-50 text-yellow-600 border-yellow-100'
+                            if (type === 'DESPIDO') badgeColor = 'bg-red-50 text-red-600 border-red-100'
+
+                            return (
+                                <div className="space-y-1">
+                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${badgeColor}`}>
+                                        {type}
+                                    </span>
+                                    <p className="text-xs text-gray-600 max-w-[200px] truncate" title={detail}>
+                                        {detail || 'Sin detalle'}
+                                    </p>
+                                </div>
+                            )
+                        })()}
                         {emp.termination_document_url && (
-                          <a 
-                            href={emp.termination_document_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
-                          >
-                            <FileText size={10} /> Ver documento
-                          </a>
+                          <div className="flex flex-col gap-1 mt-1">
+                            {(() => {
+                                try {
+                                    // Intenta parsear como array JSON
+                                    const urls = JSON.parse(emp.termination_document_url)
+                                    if (Array.isArray(urls)) {
+                                        return urls.map((url, i) => (
+                                            <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                                                <FileText size={10} /> Ver documento {i+1}
+                                            </a>
+                                        ))
+                                    }
+                                    throw new Error('Not array')
+                                } catch (e) {
+                                    // Fallback para URL simple
+                                    return (
+                                        <a href={emp.termination_document_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                                            <FileText size={10} /> Ver documento
+                                        </a>
+                                    )
+                                }
+                            })()}
+                          </div>
                         )}
                       </td>
                     )}

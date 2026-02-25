@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from 'react'
 import { getPolicies, createPolicy, deletePolicy } from '../services/mobileAccess'
-import { getLocations } from '../services/structure'
+import { getSedes, getOrganizationStructure } from '../services/organization'
 import { getPositions } from '../services/positions'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -48,20 +48,21 @@ export default function MobileAccessConfig() {
       setPolicies(policiesData || [])
 
       // 2. Fetch Options
-      const { data: locs } = await getLocations()
+      const { data: locs } = await getSedes()
       setLocations(locs || [])
 
       const { data: pos } = await getPositions()
       setPositions(pos || [])
 
-      // 3. Fetch Distinct Business Units from Employees (Best effort)
-      const { data: buData } = await supabase
-        .from('employees')
-        .select('business_unit')
-        .not('business_unit', 'is', null)
-      
-      if (buData) {
-        const uniqueBUs = [...new Set(buData.map(item => item.business_unit?.trim().toUpperCase()))].sort()
+      // 3. Fetch Business Units from Organization Structure (Official list)
+      const { data: structData } = await getOrganizationStructure()
+      if (structData) {
+        // Extract unique business units
+        const uniqueBUs = [...new Set(
+            structData
+                .map(item => item.business_units?.name?.trim().toUpperCase())
+                .filter(Boolean)
+        )].sort()
         setBusinessUnits(uniqueBUs)
       }
 
