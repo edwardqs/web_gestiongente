@@ -140,3 +140,55 @@ export const getVacationBalanceReport = async (sede = null) => {
         return { data: null, error }
     }
 }
+
+/**
+ * Obtiene el reporte de bajas en un rango de fechas
+ */
+export const getTerminationsReport = async (startDate, endDate, sede = null, businessUnit = null) => {
+    try {
+        // 1. Query base a employees (inactivos)
+        let query = supabase
+            .from('employees')
+            .select('*')
+            .eq('is_active', false)
+            .gte('termination_date', startDate) // Filtrar por fecha de baja
+            .lte('termination_date', endDate)
+            .order('termination_date', { ascending: false })
+
+        if (sede && sede !== 'all') {
+            query = query.eq('sede', sede)
+        }
+
+        if (businessUnit && businessUnit !== 'all') {
+            query = query.eq('business_unit', businessUnit)
+        }
+
+        const { data: employees, error: empError } = await query
+        if (empError) throw empError
+
+        // 2. Obtener cargos para mapear áreas (igual que en reporte de empleados)
+        const { data: positions, error: posError } = await supabase
+            .from('job_positions')
+            .select('name, areas(name)')
+        
+        const positionAreaMap = {}
+        if (positions) {
+            positions.forEach(pos => {
+                if (pos.name) {
+                    positionAreaMap[pos.name] = pos.areas?.name || 'Sin Área'
+                }
+            })
+        }
+
+        // 3. Cruzar datos
+        const enrichedData = employees.map(emp => ({
+            ...emp,
+            area_name: positionAreaMap[emp.position] || 'Sin Área'
+        }))
+
+        return { data: enrichedData, error: null }
+    } catch (error) {
+        console.error('Error fetching terminations report:', error)
+        return { data: null, error }
+    }
+}

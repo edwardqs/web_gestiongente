@@ -11,13 +11,15 @@ import {
     Briefcase,
     Filter,
     Table,
-    ChevronDown
+    ChevronDown,
+    UserMinus // Icono para bajas
 } from 'lucide-react'
 import { 
     getEmployeesReport, 
     getAttendanceReport, 
     getNewHiresReport, 
-    getVacationBalanceReport 
+    getVacationBalanceReport,
+    getTerminationsReport
 } from '../services/reports'
 
 export default function ReportsCenter() {
@@ -52,6 +54,11 @@ export default function ReportsCenter() {
     const [selectedMonth, setSelectedMonth] = useState({
         year: new Date().getFullYear(),
         month: new Date().getMonth() + 1
+    })
+
+    const [terminationsRange, setTerminationsRange] = useState({
+        start: getPeruDate(),
+        end: getPeruDate()
     })
 
     const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
@@ -251,6 +258,40 @@ export default function ReportsCenter() {
                     
                     fileName = `Asistencias_${sedeSuffix}_${dateRange.start}_al_${dateRange.end}.xlsx`
                     sheetName = 'Asistencias'
+                    break
+
+                case 'terminations':
+                    const tStart = `${terminationsRange.start}T00:00:00`
+                    const tEnd = `${terminationsRange.end}T23:59:59`
+                    
+                    const { data: termData, error: termError } = await getTerminationsReport(
+                        tStart,
+                        tEnd,
+                        selectedSede === 'all' ? null : selectedSede,
+                        selectedBusinessUnit === 'all' ? null : selectedBusinessUnit
+                    )
+                    
+                    if (termError || !termData) {
+                        throw new Error('No se pudieron cargar los datos de bajas')
+                    }
+                    
+                    data = termData.map(t => ({
+                        'DNI': t.dni,
+                        'Nombre Completo': t.full_name,
+                        'Cargo': t.position,
+                        'Área': t.area_name,
+                        'Sede': t.sede,
+                        'Unidad Negocio': t.business_unit || '-',
+                        'Fecha Ingreso': t.entry_date,
+                        'Fecha Baja': t.termination_date ? t.termination_date.split('T')[0] : '-',
+                        'Motivo': t.termination_reason || '-',
+                        'Documento(s)': t.termination_document_url || '-',
+                        'Email': t.email,
+                        'Celular': t.phone
+                    }))
+                    
+                    fileName = `Reporte_Bajas_${sedeSuffix}_${terminationsRange.start}_al_${terminationsRange.end}.xlsx`
+                    sheetName = 'Bajas'
                     break
 
                 case 'hires':
@@ -520,6 +561,51 @@ export default function ReportsCenter() {
                             onClick={() => handleExport('hires')}
                             disabled={loading}
                             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium disabled:opacity-50"
+                        >
+                            {loading ? 'Generando...' : 'Descargar Excel'}
+                            <Download size={18} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* CARD 5: BAJAS */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                    <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 bg-red-100 rounded-lg text-red-600">
+                                <UserMinus size={24} />
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900">Reporte de Bajas</h3>
+                        </div>
+                        <p className="text-sm text-gray-500">
+                            Listado de personal cesado, incluyendo motivo y fecha de baja.
+                        </p>
+                    </div>
+                    <div className="p-6 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">Desde</label>
+                                <input 
+                                    type="date" 
+                                    value={terminationsRange.start}
+                                    onChange={(e) => setTerminationsRange(prev => ({...prev, start: e.target.value}))}
+                                    className="w-full border-gray-300 rounded-lg text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">Hasta</label>
+                                <input 
+                                    type="date" 
+                                    value={terminationsRange.end}
+                                    onChange={(e) => setTerminationsRange(prev => ({...prev, end: e.target.value}))}
+                                    className="w-full border-gray-300 rounded-lg text-sm"
+                                />
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => handleExport('terminations')}
+                            disabled={loading}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium disabled:opacity-50"
                         >
                             {loading ? 'Generando...' : 'Descargar Excel'}
                             <Download size={18} />

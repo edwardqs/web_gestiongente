@@ -8,7 +8,7 @@ import { Download, Users, Clock, AlertTriangle, Briefcase, Calendar, UserMinus }
 import * as XLSX from 'xlsx'
 import { 
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-    PieChart, Pie, Cell, AreaChart, Area
+    PieChart, Pie, Cell, AreaChart, Area, LineChart, Line
 } from 'recharts'
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
@@ -27,6 +27,7 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
     const [positionAreaMap, setPositionAreaMap] = useState({}) // Mapa de Cargo -> Área
     const [units, setUnits] = useState([]) // Lista de unidades de negocio
     const [areas, setAreas] = useState([]) // Lista de áreas disponibles
+    const [sedesList, setSedesList] = useState([]) // Lista de sedes dinámicas
 
     useEffect(() => {
         if (isOpen) {
@@ -36,10 +37,32 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
         }
     }, [isOpen, selectedYear, selectedMonth, selectedSede, selectedUnit, selectedArea])
 
-    // Cargar datos auxiliares (áreas, unidades) al montar
+    // Cargar datos auxiliares (áreas, unidades, sedes) al montar
     useEffect(() => {
         const fetchAuxData = async () => {
-            // Cargar cargos y armar mapa de áreas
+            // 1. Cargar Sedes (Prioridad: Tabla 'sedes', Fallback: 'employees')
+            const { data: sedesData, error: sedesError } = await supabase
+                .from('sedes')
+                .select('name')
+                .eq('is_active', true)
+                .order('name')
+            
+            if (sedesData && sedesData.length > 0) {
+                setSedesList(sedesData.map(s => s.name))
+            } else {
+                // Fallback: Obtener de empleados si la tabla sedes está vacía
+                const { data: empSedes } = await supabase
+                    .from('employees')
+                    .select('sede')
+                    .not('sede', 'is', null)
+                
+                if (empSedes) {
+                    const uniqueSedes = [...new Set(empSedes.map(e => e.sede))].sort()
+                    setSedesList(uniqueSedes)
+                }
+            }
+
+            // 2. Cargar cargos y armar mapa de áreas
             const { data: positionsData } = await getPositions()
             const areaMap = {}
             const uniqueAreas = new Set()
@@ -227,6 +250,23 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
         XLSX.writeFile(wb, `Nuevos_Ingresos_${selectedMonth}_${selectedYear}.xlsx`)
     }
 
+    // Preparar datos combinados para el gráfico de Ingresos vs Bajas
+    const combinedTrend = useMemo(() => {
+        if (!terminationsTrend.length) return []
+        
+        return terminationsTrend.map(t => {
+            // Buscar datos de ingresos coincidentes por nombre de mes
+            // Asumimos que metrics.hires_trend tiene formato compatible (ver loadMetrics)
+            const hireData = metrics?.hires_trend?.find(h => h.name === t.name)
+            
+            return {
+                name: t.name,
+                bajas: t.bajas || 0,
+                ingresos: hireData ? (hireData.ingresos || hireData.count || 0) : 0
+            }
+        })
+    }, [terminationsTrend, metrics])
+
     // Preparar datos para gráficos
     const attendanceData = useMemo(() => {
         if (!metrics?.attendance_summary) return []
@@ -258,11 +298,9 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
                             className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
                         >
                             <option value="all">Todas las Sedes</option>
-                            <option value="ADM. CENTRAL">ADM. CENTRAL</option>
-                            <option value="LIMA">Lima</option>
-                            <option value="TRUJILLO">Trujillo</option>
-                            <option value="CHIMBOTE">Chimbote</option>
-                            <option value="HUARAZ">Huaraz</option>
+                            {sedesList.map(sede => (
+                                <option key={sede} value={sede}>{sede}</option>
+                            ))}
                         </select>
 
                         <select 
@@ -382,57 +420,59 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
 
                             {/* Gráficos Principales */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                {/* Evolución de Ingresos */}
-                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                {/* Evolución Combinada: Ingresos vs Bajas */}
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
                                     <div className="flex justify-between items-center mb-6">
-                                        <h3 className="font-bold text-slate-700">Evolución de Ingresos (6 Meses)</h3>
+                                        <h3 className="font-bold text-slate-700">Evolución de Ingresos y Bajas (6 Meses)</h3>
                                         <button 
                                             onClick={handleExportNewHires}
                                             disabled={!metrics.new_hires?.count}
                                             className="flex items-center gap-2 text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 disabled:opacity-50"
                                         >
-                                            <Download size={14} /> Exportar Excel
+                                            <Download size={14} /> Exportar Ingresos
                                         </button>
                                     </div>
-                                    <div className="h-64">
+                                    <div className="h-72">
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <AreaChart data={metrics.hires_trend}>
-                                                <defs>
-                                                    <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                                    </linearGradient>
-                                                </defs>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                                <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                                                <YAxis axisLine={false} tickLine={false} />
-                                                <Tooltip />
-                                                <Area type="monotone" dataKey="ingresos" stroke="#3b82f6" fillOpacity={1} fill="url(#colorIngresos)" />
-                                            </AreaChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                </div>
-
-                                {/* Evolución de Bajas */}
-                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                                    <div className="flex justify-between items-center mb-6">
-                                        <h3 className="font-bold text-slate-700">Evolución de Bajas (6 Meses)</h3>
-                                    </div>
-                                    <div className="h-64">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <AreaChart data={terminationsTrend}>
-                                                <defs>
-                                                    <linearGradient id="colorBajas" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#ea580c" stopOpacity={0.8}/>
-                                                        <stop offset="95%" stopColor="#ea580c" stopOpacity={0}/>
-                                                    </linearGradient>
-                                                </defs>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                                <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                                                <YAxis axisLine={false} tickLine={false} />
-                                                <Tooltip />
-                                                <Area type="monotone" dataKey="bajas" stroke="#ea580c" fillOpacity={1} fill="url(#colorBajas)" />
-                                            </AreaChart>
+                                            <LineChart data={combinedTrend}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                                <XAxis 
+                                                    dataKey="name" 
+                                                    axisLine={false} 
+                                                    tickLine={false} 
+                                                    tick={{fill: '#64748b', fontSize: 12}}
+                                                    dy={10}
+                                                />
+                                                <YAxis 
+                                                    axisLine={false} 
+                                                    tickLine={false} 
+                                                    tick={{fill: '#64748b', fontSize: 12}}
+                                                />
+                                                <Tooltip 
+                                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                />
+                                                <Legend 
+                                                    wrapperStyle={{ paddingTop: '20px' }}
+                                                />
+                                                <Line 
+                                                    type="monotone" 
+                                                    dataKey="ingresos" 
+                                                    name="Ingresos" 
+                                                    stroke="#22c55e" 
+                                                    strokeWidth={3} 
+                                                    dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} 
+                                                    activeDot={{ r: 6, strokeWidth: 0 }}
+                                                />
+                                                <Line 
+                                                    type="monotone" 
+                                                    dataKey="bajas" 
+                                                    name="Bajas" 
+                                                    stroke="#ef4444" 
+                                                    strokeWidth={3} 
+                                                    dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                                                    activeDot={{ r: 6, strokeWidth: 0 }}
+                                                />
+                                            </LineChart>
                                         </ResponsiveContainer>
                                     </div>
                                 </div>
