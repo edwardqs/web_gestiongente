@@ -236,12 +236,12 @@ export default function AttendanceList() {
                 userRole === 'SUPER ADMIN' || 
                 userRole === 'JEFE_RRHH' || 
                 userPosition.includes('JEFE DE GENTE') ||
-                userPosition.includes('ANALISTA DE GENTE') ||
                 userPosition.includes('GERENTE GENERAL') ||
-                (user?.permissions && user?.permissions['*'])
-            ) && (
-                !userPosition.includes('ANALISTA') || 
-                userPosition.includes('ANALISTA DE GENTE')
+                (user?.permissions && user?.permissions['*']) ||
+                // Excepción Part Time ADM CENTRAL
+                (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+                 user?.sede === 'ADM. CENTRAL' && 
+                 (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'))
             );
             
             const isBoss = userRole.includes('JEFE') || 
@@ -767,10 +767,13 @@ export default function AttendanceList() {
                 user?.role === 'JEFE_RRHH' || 
                 user?.position?.includes('JEFE DE GENTE') ||
                 user?.position?.includes('JEFE DE RRHH') ||
-                user?.position?.includes('GERENTE') ||
                 user?.position?.includes('GERENTE GENERAL') ||
-                (user?.permissions && user?.permissions['*'])
-            ) && !user?.position?.includes('ANALISTA');
+                (user?.permissions && user?.permissions['*']) ||
+                // Excepción Part Time ADM CENTRAL
+                (user?.position?.includes('ANALISTA DE GENTE') && user?.position?.includes('PART TIME') && 
+                 user?.sede === 'ADM. CENTRAL' && 
+                 (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'))
+            );
 
             const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
             const userRole = normalize(user?.role);
@@ -1589,21 +1592,33 @@ export default function AttendanceList() {
                                         <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(attendance)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap">{getRecordTypeBadge(attendance)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            {(attendance.notes || attendance.absence_reason || attendance.evidence_url) ? (
-                                                <button
-                                                    onClick={() => setReasonModal({
-                                                        employee: attendance.employees?.full_name,
-                                                        notes: attendance.absence_reason || attendance.notes,
-                                                        evidence: attendance.evidence_url
-                                                    })}
-                                                    className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
-                                                >
-                                                    <AlertCircle className="h-4 w-4" />
-                                                    Ver Detalle
-                                                </button>
-                                            ) : (
-                                                <span className="text-sm text-gray-400">-</span>
-                                            )}
+                                            {(() => {
+                                                const hasNotes = attendance.notes || attendance.absence_reason;
+                                                const hasEvidence = attendance.evidence_url;
+                                                
+                                                if (!hasNotes && !hasEvidence) return <span className="text-sm text-gray-400">-</span>;
+
+                                                return (
+                                                    <div className="flex flex-col gap-1">
+                                                        {hasNotes && (
+                                                            <div className="text-sm text-gray-700 max-w-[200px] truncate" title={attendance.absence_reason || attendance.notes}>
+                                                                {attendance.absence_reason || attendance.notes}
+                                                            </div>
+                                                        )}
+                                                        <button
+                                                            onClick={() => setReasonModal({
+                                                                employee: attendance.employees?.full_name,
+                                                                notes: attendance.absence_reason || attendance.notes,
+                                                                evidence: attendance.evidence_url
+                                                            })}
+                                                            className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-1 w-fit"
+                                                        >
+                                                            <AlertCircle className="h-3 w-3" />
+                                                            Ver Detalle
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             {attendance.validated ? (

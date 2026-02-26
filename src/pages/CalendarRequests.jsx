@@ -33,7 +33,18 @@ const CalendarRequests = () => {
           let filteredData = data
           
           // --- FILTRADO DE SEGURIDAD POR SEDE/UNIDAD ---
-          const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+          const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+          const userPosition = normalize(user?.position);
+          
+          const isGlobalAdmin = 
+            user?.role === 'ADMIN' || 
+            user?.role === 'SUPER ADMIN' || 
+            user?.role === 'JEFE_RRHH' || 
+            (user?.permissions && user?.permissions['*']) ||
+            // Excepción Part Time ADM CENTRAL
+            (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+             user?.sede === 'ADM. CENTRAL' && 
+             (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'));
           
           // Filtrar canceladas o rechazadas (Nuevo requerimiento)
           filteredData = filteredData.filter(req => {

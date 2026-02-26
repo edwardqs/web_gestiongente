@@ -57,6 +57,46 @@ export default function EmployeeLifecycle() {
         .from('employees')
         .select('*')
 
+      // ── FILTRADO DE SEGURIDAD ──
+      const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+      const userRole = normalize(user?.role);
+      const userPosition = normalize(user?.position);
+
+      const isGlobalAdmin =
+        userRole === 'ADMIN' || userRole === 'SUPER ADMIN' || userRole === 'JEFE_RRHH' ||
+        userPosition.includes('JEFE DE GENTE') || 
+        userPosition.includes('GERENTE GENERAL') ||
+        (user?.permissions && user?.permissions['*']) ||
+        // Excepción Part Time ADM CENTRAL
+        (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+         user?.sede === 'ADM. CENTRAL' && 
+         (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'));
+      
+      const isBoss = userRole.includes('JEFE') || 
+                     userRole.includes('GERENTE') || 
+                     userPosition.includes('JEFE') || 
+                     userPosition.includes('GERENTE') ||
+                     userPosition.includes('COORDINADOR') ||
+                     userPosition.includes('SUPERVISOR');
+
+      if (!isGlobalAdmin) {
+          // Si es Jefe, idealmente filtraríamos por Área, pero como fallback usamos Sede si no es Jefe Global.
+          // Para Analistas (que no son Jefes), filtramos estrictamente por Sede y Unidad.
+          if (user?.sede && !isBoss) {
+              query = query.eq('sede', user.sede)
+          }
+          if (user?.business_unit && !isBoss) {
+              query = query.eq('business_unit', user.business_unit)
+          }
+          
+          // Si es Jefe (Supervisor/Coordinador), podríamos necesitar filtrar por Área.
+          // Por ahora, asumimos que Lifecycle es principalmente para RRHH (Analistas/Jefes de Gente).
+          // Si un Supervisor entra aquí, verá todo si no filtramos.
+          // Pero ProtectedRoute limita el acceso a 'lifecycle' solo a RRHH/Gerencia.
+          // Así que los Supervisores normales NO entran aquí.
+          // Los únicos que entran son Analistas de Gente (que ahora filtramos por sede) y Jefes de Gente (Admins).
+      }
+
       // Construir rango de fechas para el mes seleccionado
       const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`
       const endDate = new Date(selectedYear, selectedMonth, 0).toISOString().split('T')[0] // Último día del mes

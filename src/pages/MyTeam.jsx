@@ -27,20 +27,42 @@ export default function MyTeam() {
 
   // Determinar Área del Supervisor/Jefe
   const userArea = useMemo(() => {
+    // 0. Revisar Unidad de Negocio primero (Failsafe)
+    // Si la persona pertenece a la unidad de RRHH/Gente, debe ver todo en su sede
+    const bu = normalize(user?.business_unit)
+    if (bu.includes('GENTE') || bu.includes('RRHH') || bu.includes('HUMANO') || bu.includes('TALENTO') || bu.includes('PERSONAS')) return null
+
+    // 1. Prioridad: Roles de RRHH y Gente y Gestión (Ven todo dentro de su filtro de Sede/Unidad)
+    // Se coloca al inicio para evitar que coincidan con otras palabras clave por error
+    if (userPosition.includes('GENTE') || 
+        userPosition.includes('RRHH') || 
+        userPosition.includes('RECURSOS HUMANOS') ||
+        userPosition.includes('TALENTO') ||
+        userPosition.includes('HUMANO') ||
+        userPosition.includes('CULTURA') ||
+        userPosition.includes('BIENESTAR') ||
+        userPosition.includes('SOCIAL') ||
+        userPosition.includes('SELECCION') ||
+        userPosition.includes('DESARROLLO') ||
+        userPosition.includes('NOMINA') ||
+        userPosition.includes('PLANILLA') ||
+        userPosition.includes('COMPENSACION')) return null
+
     if (userPosition.includes('OPERACIONES')) return 'OPERACIONES'
     if (userPosition.includes('COMERCIAL') || userPosition.includes('VENTAS')) return 'COMERCIAL'
     if (userPosition.includes('ALMACEN') || userPosition.includes('LOGISTICA')) return 'ALMACEN'
     if (userPosition.includes('DISTRIBUCION') || userPosition.includes('TRANSPORTE')) return 'DISTRIBUCION'
     if (userPosition.includes('MANTENIMIENTO')) return 'MANTENIMIENTO'
     if (userPosition.includes('FINANZAS') || userPosition.includes('CONTABILIDAD')) return 'FINANZAS'
-    if (userPosition.includes('SISTEMAS') || userPosition.includes('TI')) return 'SISTEMAS'
-    if (userPosition.includes('GENTE') || userPosition.includes('RRHH')) return 'GENTE Y GESTION'
+    // TI es peligroso como substring corto (ej. GES-TI-ON), ser más específico
+    if (userPosition.includes('SISTEMAS') || userPosition.includes('TECNOLOGIA') || userPosition.includes('INFORMATICA') || userPosition.includes(' TI ') || userPosition.endsWith(' TI')) return 'SISTEMAS'
+    
     return null
-  }, [userPosition])
+  }, [userPosition, user?.business_unit])
 
   useEffect(() => {
-    fetchMyTeam()
-  }, [user])
+    if (user?.id) fetchMyTeam()
+  }, [user?.id, user?.sede, user?.business_unit])
 
   const fetchMyTeam = async () => {
     setLoading(true)

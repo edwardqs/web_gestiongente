@@ -61,7 +61,20 @@ export default function ReportsCenter() {
         end: getPeruDate()
     })
 
-    const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+    // ── FILTRADO DE SEGURIDAD ──
+    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+    const userPosition = normalize(user?.position);
+
+    const isGlobalAdmin = 
+        user?.role === 'ADMIN' || 
+        user?.role === 'SUPER ADMIN' || 
+        user?.role === 'JEFE_RRHH' || 
+        (user?.permissions && user?.permissions['*']) ||
+        // Excepción Part Time ADM CENTRAL
+        (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+         user?.sede === 'ADM. CENTRAL' && 
+         (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'));
+
     const canSelectSede = isGlobalAdmin && !user?.sede
 
     const handleExport = async (type) => {

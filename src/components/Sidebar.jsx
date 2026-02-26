@@ -117,7 +117,14 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
     let showEmployeesMenu = true // Por defecto visible
     
     // Si NO es Admin/SuperAdmin/JefeRRHH, redirigir a su sede
-    const isGlobalAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER ADMIN' || user?.role === 'JEFE_RRHH' || (user?.permissions && user?.permissions['*'])
+    const isGlobalAdmin = user?.role === 'ADMIN' || 
+                          user?.role === 'SUPER ADMIN' || 
+                          user?.role === 'JEFE_RRHH' || 
+                          (user?.permissions && user?.permissions['*']) ||
+                          // Excepción Part Time ADM CENTRAL
+                          (user?.position?.includes('ANALISTA DE GENTE') && user?.position?.includes('PART TIME') && 
+                           user?.sede === 'ADM. CENTRAL' && 
+                           (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'))
     const isAnalyst = user?.role?.includes('ANALISTA') || user?.position?.includes('ANALISTA')
     
     // Nueva lógica: Determinar si es un JEFE que NO es JEFE DE GENTE DE GESTIÓN
@@ -148,11 +155,11 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
         employeesHref = '/my-team'
         
         // OCULTAR MENÚ PARA ANALISTAS DE GENTE Y GESTIÓN
-        // Si es Analista y tiene sede asignada, se oculta 'Mi Equipo' porque ya usa 'Dptos / Sedes'
-        // Se mantiene visible solo para Jefes Operativos (Ventas, Logística, etc.)
-        if (isAnalyst) {
-            showEmployeesMenu = false
-        }
+        // MODIFICACIÓN: Ahora los Analistas SÍ deben ver Empleados (pero filtrado)
+        // Se mantiene oculto solo si hay alguna razón específica, pero la solicitud dice que deben verlo.
+        // if (isAnalyst) {
+        //    showEmployeesMenu = false
+        // }
     }
 
   const items = [
@@ -382,10 +389,18 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
   // Filtrado de menú por RBAC (memoizado)
   const visibleMenuItems = useMemo(() => {
+    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+    const userRole = normalize(user?.role);
+    const userPosition = normalize(user?.position);
+
     const isAdmin = user?.role === 'ADMIN' || 
                     user?.role === 'SUPER ADMIN' || 
                     user?.role === 'JEFE_RRHH' || 
-                    (user?.permissions && user?.permissions['*'])
+                    (user?.permissions && user?.permissions['*']) ||
+                    // Excepción Part Time ADM CENTRAL
+                    (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+                     user?.sede === 'ADM. CENTRAL' && 
+                     (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'))
 
     return menuItems.reduce((acc, item) => {
       // 1. Verificar si es Admin o tiene permiso explícito
@@ -394,15 +409,19 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
 
       // 2. CORRECCIÓN ESPECÍFICA PARA VACACIONES Y EMPLEADOS (Analistas, Jefes y Supervisores deben ver)
       // Si el módulo es 'vacations' o 'employees' y no tiene permiso explícito pero es Analista/Jefe/Supervisor, dar acceso
-      if ((item.module === 'vacations' || item.module === 'employees') && !hasModuleAccess) {
-          const isAnalystOrBoss = user?.role?.includes('ANALISTA') || 
-                                  user?.role?.includes('JEFE') || 
-                                  user?.role?.includes('SUPERVISOR') ||
-                                  user?.position?.includes('ANALISTA') ||
-                                  user?.position?.includes('JEFE') ||
-                                  user?.position?.includes('GERENTE') ||
-                                  user?.position?.includes('COORDINADOR') ||
-                                  user?.position?.includes('SUPERVISOR');
+      // ACTUALIZACIÓN: Se agregan 'dashboard', 'attendance', 'calendar', 'lifecycle', 'requests' para Analistas
+      const allowedModulesForAnalyst = ['vacations', 'employees', 'dashboard', 'attendance', 'calendar', 'lifecycle', 'requests'];
+      
+      if (allowedModulesForAnalyst.includes(item.module) && !hasModuleAccess) {
+          // Usamos las variables normalizadas (userRole, userPosition) definidas arriba para evitar problemas de mayúsculas/tildes
+          const isAnalystOrBoss = userRole?.includes('ANALISTA') || 
+                                  userRole?.includes('JEFE') || 
+                                  userRole?.includes('SUPERVISOR') ||
+                                  userPosition?.includes('ANALISTA') ||
+                                  userPosition?.includes('JEFE') ||
+                                  userPosition?.includes('GERENTE') ||
+                                  userPosition?.includes('COORDINADOR') ||
+                                  userPosition?.includes('SUPERVISOR');
                                   
           if (isAnalystOrBoss) hasModuleAccess = true;
       }
@@ -417,12 +436,12 @@ export default function Sidebar({ isOpen, setIsOpen, isCollapsed, setIsCollapsed
           // 1. Definir roles con acceso global explícito (además de Admins)
           // Gerente General y TODOS los Jefes deben ver todo.
           // Solo restringimos a Coordinadores y Supervisores.
-          const isBoss = user?.role?.includes('JEFE') || 
-                         user?.role?.includes('GERENTE') || 
-                         user?.position?.includes('JEFE') || 
-                         user?.position?.includes('GERENTE');
+          const isBoss = userRole?.includes('JEFE') || 
+                         userRole?.includes('GERENTE') || 
+                         userPosition?.includes('JEFE') || 
+                         userPosition?.includes('GERENTE');
 
-          const hasGlobalAccess = isBoss || user?.position?.includes('GERENTE GENERAL');
+          const hasGlobalAccess = isBoss || userPosition?.includes('GERENTE GENERAL');
 
           if (!hasGlobalAccess) {
               // Si NO es Jefe/Gerente (es decir, es Supervisor, Coordinador o Analista), aplicamos filtros

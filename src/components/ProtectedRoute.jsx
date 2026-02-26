@@ -40,18 +40,25 @@ export const ProtectedRoute = ({ module, requiredAction = 'read', children }) =>
       // Buscar permisos específicos o comodín '*'
       let modulePerms = perms[module] || perms['*'];
       
+      const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+      const userRole = normalize(user.role);
+      const userPosition = normalize(user.position);
+
       // --- EXCEPCIÓN PARA VACACIONES, DASHBOARD Y EMPLEADOS ---
       // Si el módulo es 'vacations', 'dashboard' o 'employees' y no tiene permiso explícito, 
       // pero es Analista/Jefe/Gerente/Coordinador/Supervisor, otorgar permiso de lectura
-      if (!modulePerms && (module === 'vacations' || module === 'dashboard' || module === 'employees')) {
-          const isAnalystOrBoss = user.role?.includes('ANALISTA') || 
-                                  user.role?.includes('JEFE') || 
-                                  user.role?.includes('SUPERVISOR') ||
-                                  user.position?.includes('ANALISTA') ||
-                                  user.position?.includes('JEFE') ||
-                                  user.position?.includes('GERENTE') ||
-                                  user.position?.includes('COORDINADOR') ||
-                                  user.position?.includes('SUPERVISOR');
+      // ACTUALIZACIÓN: Se agregan 'attendance', 'calendar', 'requests' para Analistas
+      const allowedModulesForAnalyst = ['vacations', 'employees', 'dashboard', 'attendance', 'calendar', 'requests'];
+
+      if (!modulePerms && allowedModulesForAnalyst.includes(module)) {
+          const isAnalystOrBoss = userRole.includes('ANALISTA') || 
+                                  userRole.includes('JEFE') || 
+                                  userRole.includes('SUPERVISOR') ||
+                                  userPosition.includes('ANALISTA') ||
+                                  userPosition.includes('JEFE') ||
+                                  userPosition.includes('GERENTE') ||
+                                  userPosition.includes('COORDINADOR') ||
+                                  userPosition.includes('SUPERVISOR');
                                   
           if (isAnalystOrBoss) {
               modulePerms = { read: true, write: true, delete: false }; // Permiso por defecto
@@ -62,9 +69,9 @@ export const ProtectedRoute = ({ module, requiredAction = 'read', children }) =>
       // Solo para RRHH y Gerencia
       if (!modulePerms && module === 'lifecycle') {
           const isHR = user.role === 'JEFE_RRHH' || 
-                       user.position?.includes('JEFE DE GENTE') ||
-                       user.position?.includes('ANALISTA DE GENTE') ||
-                       user.position?.includes('GERENTE');
+                       userPosition.includes('JEFE DE GENTE') ||
+                       userPosition.includes('ANALISTA DE GENTE') ||
+                       userPosition.includes('GERENTE');
           
           if (isHR) {
               modulePerms = { read: true, write: true, delete: false };

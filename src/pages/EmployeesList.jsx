@@ -53,9 +53,13 @@ export default function EmployeesList() {
   // ── Niveles de acceso ──────────────────────────────────────────────────────
   const isGlobalAdmin =
     userRole === 'ADMIN' || userRole === 'SUPER ADMIN' || userRole === 'JEFE_RRHH' ||
-    userPosition.includes('JEFE DE GENTE') || userPosition.includes('ANALISTA DE GENTE') ||
+    userPosition.includes('JEFE DE GENTE') || 
     userPosition.includes('GERENTE GENERAL') ||
-    (user?.permissions && user?.permissions['*'])
+    (user?.permissions && user?.permissions['*']) ||
+    // Excepción específica: Analista Part Time de ADM. CENTRAL / ADMINISTRACIÓN
+    (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+     currentSedeName === 'ADM. CENTRAL' && 
+     (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'))
 
   const isBoss =
     userRole.includes('JEFE') || userRole.includes('GERENTE') ||

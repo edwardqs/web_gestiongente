@@ -71,7 +71,11 @@ export default function RequestsList() {
         userPosition.includes('JEFE DE GENTE') || 
         userPosition.includes('GERENTE') ||
         userPosition.includes('GERENTE GENERAL') ||
-        (user?.permissions && user?.permissions['*'])
+        (user?.permissions && user?.permissions['*']) ||
+        // Excepción Part Time ADM CENTRAL
+        (userPosition.includes('ANALISTA DE GENTE') && userPosition.includes('PART TIME') && 
+         user?.sede === 'ADM. CENTRAL' && 
+         (user?.business_unit?.toUpperCase() === 'ADMINISTRACIÓN' || user?.business_unit?.toUpperCase() === 'ADMINISTRACION'))
       
       const isBoss = userRole.includes('JEFE') || 
                      userRole.includes('GERENTE') || 
