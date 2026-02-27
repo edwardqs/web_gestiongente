@@ -1,8 +1,36 @@
-import React from 'react';
-import { Mail, Phone, MapPin, Briefcase, Calendar, Building2, Store, CreditCard } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Mail, Phone, MapPin, Briefcase, Calendar, Building2, Store, CreditCard, History, ArrowUpRight } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 export default function EmployeeProfileCard({ employee }) {
   if (!employee) return null;
+  const [jobHistory, setJobHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Cargar historial de promociones
+  useEffect(() => {
+    if (employee?.id) {
+        fetchJobHistory();
+    }
+  }, [employee?.id]);
+
+  const fetchJobHistory = async () => {
+    setLoadingHistory(true);
+    try {
+        const { data, error } = await supabase
+            .from('job_history')
+            .select('*')
+            .eq('employee_id', employee.id)
+            .order('changed_at', { ascending: false });
+        
+        if (error) throw error;
+        setJobHistory(data || []);
+    } catch (error) {
+        console.error('Error fetching job history:', error);
+    } finally {
+        setLoadingHistory(false);
+    }
+  };
 
   // Banner color generator based on name (pseudo-random consistent color)
   const getBannerColor = (name) => {
@@ -151,6 +179,88 @@ export default function EmployeeProfileCard({ employee }) {
             ID de Empleado: {employee.id}
         </p>
       </div>
+
+      {/* Historial de Promociones (Si existe) */}
+      {jobHistory.length > 0 && (
+          <div className="bg-white border-t border-gray-200">
+              <div className="px-6 py-4 bg-gray-50/50 flex items-center justify-between border-b border-gray-100">
+                  <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                      <History size={16} className="text-blue-600" />
+                      Historial de Promociones
+                  </h3>
+                  <span className="text-xs text-gray-400 font-medium">{jobHistory.length} cambios registrados</span>
+              </div>
+              
+              <div className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                  {jobHistory.map((history) => (
+                      <div key={history.id} className="p-4 hover:bg-gray-50 transition-colors group">
+                          <div className="flex items-start gap-3">
+                              <div className="mt-1 p-1.5 bg-blue-100 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                  <ArrowUpRight size={16} />
+                              </div>
+                              <div className="flex-1 space-y-2">
+                                  {/* Header: Fecha y Motivo */}
+                                  <div className="flex justify-between items-center">
+                                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                          {new Date(history.changed_at).toLocaleDateString('es-PE', { 
+                                              year: 'numeric', month: 'short', day: 'numeric',
+                                              hour: '2-digit', minute: '2-digit'
+                                          })}
+                                      </span>
+                                      {history.change_reason && (
+                                          <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold uppercase rounded-full border border-green-200">
+                                              {history.change_reason}
+                                          </span>
+                                      )}
+                                  </div>
+
+                                  {/* Detalles del Cambio */}
+                                  <div className="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-2 text-xs">
+                                      {/* Puesto */}
+                                      {history.previous_position !== history.new_position && (
+                                          <div className="grid grid-cols-[1fr,auto,1fr] gap-2 items-center">
+                                              <div className="text-right">
+                                                  <span className="block text-[10px] text-gray-400 uppercase">Puesto Anterior</span>
+                                                  <span className="font-medium text-gray-600 line-clamp-1" title={history.previous_position}>
+                                                      {history.previous_position || '-'}
+                                                  </span>
+                                              </div>
+                                              <div className="text-gray-300">→</div>
+                                              <div>
+                                                  <span className="block text-[10px] text-blue-500 uppercase font-bold">Nuevo Puesto</span>
+                                                  <span className="font-bold text-gray-800 line-clamp-1" title={history.new_position}>
+                                                      {history.new_position}
+                                                  </span>
+                                              </div>
+                                          </div>
+                                      )}
+
+                                      {/* Sede/Unidad */}
+                                      {(history.previous_sede !== history.new_sede || history.previous_business_unit !== history.new_business_unit) && (
+                                          <div className="grid grid-cols-[1fr,auto,1fr] gap-2 items-center pt-1 border-t border-slate-100">
+                                              <div className="text-right">
+                                                  <span className="block text-[10px] text-gray-400 uppercase">Ubicación Anterior</span>
+                                                  <span className="font-medium text-gray-600">
+                                                      {history.previous_sede} • {history.previous_business_unit}
+                                                  </span>
+                                              </div>
+                                              <div className="text-gray-300">→</div>
+                                              <div>
+                                                  <span className="block text-[10px] text-blue-500 uppercase font-bold">Nueva Ubicación</span>
+                                                  <span className="font-bold text-gray-800">
+                                                      {history.new_sede} • {history.new_business_unit}
+                                                  </span>
+                                              </div>
+                                          </div>
+                                      )}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
     </div>
   );
 }

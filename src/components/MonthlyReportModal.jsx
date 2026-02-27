@@ -23,11 +23,13 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
     const [selectedUnit, setSelectedUnit] = useState('all') // Nueva variable de estado para Unidad
     const [selectedArea, setSelectedArea] = useState('all') // Nueva variable de estado para Área
     const [terminationsCount, setTerminationsCount] = useState(0) // Estado para bajas del mes
+    const [terminationsBreakdown, setTerminationsBreakdown] = useState([]) // Desglose de motivos de baja
     const [terminationsTrend, setTerminationsTrend] = useState([]) // Estado para tendencia de bajas
     const [positionAreaMap, setPositionAreaMap] = useState({}) // Mapa de Cargo -> Área
     const [units, setUnits] = useState([]) // Lista de unidades de negocio
     const [areas, setAreas] = useState([]) // Lista de áreas disponibles
     const [sedesList, setSedesList] = useState([]) // Lista de sedes dinámicas
+    const [filterRawData, setFilterRawData] = useState([]) // Datos crudos para filtros
 
     useEffect(() => {
         if (isOpen) {
@@ -41,7 +43,7 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
     useEffect(() => {
         const fetchAuxData = async () => {
             // 1. Cargar Sedes (Prioridad: Tabla 'sedes', Fallback: 'employees')
-            const { data: sedesData, error: sedesError } = await supabase
+            const { data: sedesData } = await supabase
                 .from('sedes')
                 .select('name')
                 .eq('is_active', true)
@@ -50,7 +52,6 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
             if (sedesData && sedesData.length > 0) {
                 setSedesList(sedesData.map(s => s.name))
             } else {
-                // Fallback: Obtener de empleados si la tabla sedes está vacía
                 const { data: empSedes } = await supabase
                     .from('employees')
                     .select('sede')
@@ -65,33 +66,76 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
             // 2. Cargar cargos y armar mapa de áreas
             const { data: positionsData } = await getPositions()
             const areaMap = {}
-            const uniqueAreas = new Set()
-            
             if (positionsData) {
                 positionsData.forEach(pos => {
                     if (pos.area_name && pos.area_name !== 'Sin Área Asignada') {
                         areaMap[pos.name] = pos.area_name
-                        uniqueAreas.add(pos.area_name)
                     }
                 })
             }
             setPositionAreaMap(areaMap)
-            setAreas([...uniqueAreas].sort())
 
-            // Cargar unidades de negocio únicas
-            const { data: unitsData } = await supabase
+            // 3. Cargar estructura completa para filtros en cascada
+            const { data: employeesData } = await supabase
                 .from('employees')
-                .select('business_unit')
-                .not('business_unit', 'is', null)
+                .select('sede, business_unit, position')
+                // No filtramos por is_active para incluir históricos en reportes
+                // Pero si prefieres solo estructura actual, descomenta:
+                // .eq('is_active', true)
             
-            if (unitsData) {
-                const uniqueUnits = [...new Set(unitsData.map(u => u.business_unit))].sort()
-                setUnits(uniqueUnits)
+            if (employeesData) {
+                // Preprocesar datos para filtros
+                const rawData = employeesData.map(e => ({
+                    sede: e.sede,
+                    unit: e.business_unit,
+                    area: areaMap[e.position] || 'Sin Área'
+                }))
+                setFilterRawData(rawData)
             }
         }
         
         if (isOpen) fetchAuxData()
     }, [isOpen])
+
+    // Efecto para Filtros en Cascada (Sede -> Unidad -> Área)
+    useEffect(() => {
+        if (!filterRawData.length) return
+
+        let filtered = filterRawData
+
+        // 1. Filtrar por Sede si hay una seleccionada
+        if (selectedSede !== 'all') {
+            filtered = filtered.filter(item => item.sede === selectedSede)
+        }
+
+        // 2. Extraer Unidades disponibles para esta Sede
+        const availableUnits = [...new Set(filtered.map(item => item.unit).filter(Boolean))].sort()
+        setUnits(availableUnits)
+
+        // IMPORTANTE: NO resetear automáticamente la unidad si sigue existiendo en la nueva lista
+        // Solo resetear si la unidad seleccionada NO está en la lista de disponibles
+        if (selectedUnit !== 'all' && !availableUnits.includes(selectedUnit)) {
+             // Caso especial: Si migramos de SNACKS a MULTIMARCAS, puede que la UI tenga caché
+             // Permitimos que el usuario seleccione manualmente
+             setSelectedUnit('all')
+        }
+
+        // 3. Filtrar por Unidad si hay una seleccionada (para las áreas)
+        let areaFiltered = filtered
+        if (selectedUnit !== 'all') {
+            areaFiltered = areaFiltered.filter(item => item.unit === selectedUnit)
+        }
+
+        // 4. Extraer Áreas disponibles
+        const availableAreas = [...new Set(areaFiltered.map(item => item.area).filter(Boolean))].sort()
+        setAreas(availableAreas)
+
+        // Si el área seleccionada ya no es válida, resetear
+        if (selectedArea !== 'all' && !availableAreas.includes(selectedArea)) {
+            setSelectedArea('all')
+        }
+
+    }, [selectedSede, selectedUnit, filterRawData])
 
     const loadMetrics = async () => {
         setLoading(true)
@@ -127,7 +171,7 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
 
             let query = supabase
                 .from('employees')
-                .select('id, position, business_unit, termination_date, sede')
+                .select('id, position, business_unit, termination_date, sede, termination_reason')
                 .eq('is_active', false)
                 .gte('termination_date', startDate)
                 .lte('termination_date', endDate)
@@ -156,6 +200,52 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
             }
 
             setTerminationsCount(filteredData.length)
+
+            // Procesar desglose de motivos
+            const reasonCounts = {}
+            filteredData.forEach(emp => {
+                const rawReason = emp.termination_reason || 'Sin Motivo'
+                // Extraer el texto limpio (quitando el prefijo entre corchetes si existe)
+                // Ej: "[RENUNCIA]" -> "Renuncia"
+                // Ej: "[TERMINO_CONTRATO] Término de Contrato" -> "Término de Contrato"
+                
+                let cleanReason = rawReason
+                let type = 'NO_FORZADO' // Default
+                
+                // Lógica de clasificación basada en TerminationModal.jsx
+                if (rawReason.includes('[TERMINO_CONTRATO]') || 
+                    rawReason.includes('[PERIODO_PRUEBA]') || 
+                    rawReason.includes('[MUTUO_DISENSO]')) {
+                    type = 'FORZADO'
+                } else if (rawReason.includes('[RENUNCIA]') || 
+                           rawReason.includes('[ABANDONO_TRABAJO]') || 
+                           rawReason.includes('[NO_RENOVACION]')) {
+                    type = 'NO_FORZADO'
+                }
+
+                // Limpiar texto para mostrar en gráfica
+                if (rawReason.includes(']')) {
+                    const parts = rawReason.split(']')
+                    if (parts.length > 1 && parts[1].trim()) {
+                        cleanReason = parts[1].trim()
+                    } else {
+                        // Si solo tiene el tag, usar el tag limpio
+                        cleanReason = parts[0].replace('[', '').replace('_', ' ').toLowerCase()
+                        // Capitalizar
+                        cleanReason = cleanReason.charAt(0).toUpperCase() + cleanReason.slice(1)
+                    }
+                }
+
+                if (!reasonCounts[cleanReason]) {
+                    reasonCounts[cleanReason] = { name: cleanReason, count: 0, type }
+                }
+                reasonCounts[cleanReason].count++
+            })
+
+            // Convertir a array y ordenar
+            const breakdown = Object.values(reasonCounts).sort((a, b) => b.count - a.count)
+            setTerminationsBreakdown(breakdown)
+
         } catch (error) {
             console.error('Error loading terminations:', error)
         }
@@ -276,6 +366,15 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
             { name: 'Ausencia', value: metrics.attendance_summary.ausencia || 0 }
         ]
     }, [metrics])
+
+    // Datos para gráfico de Motivos de Bajas (Horizontal, Coloreado por Tipo)
+    const terminationChartData = useMemo(() => {
+        return terminationsBreakdown.map(item => ({
+            name: item.name,
+            Forzado: item.type === 'FORZADO' ? item.count : 0,
+            NoForzado: item.type === 'NO_FORZADO' ? item.count : 0
+        }))
+    }, [terminationsBreakdown])
 
     return (
         <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
@@ -434,7 +533,7 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
                                     </div>
                                     <div className="h-72">
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart data={combinedTrend}>
+                                            <BarChart data={combinedTrend}>
                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                                                 <XAxis 
                                                     dataKey="name" 
@@ -454,31 +553,27 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
                                                 <Legend 
                                                     wrapperStyle={{ paddingTop: '20px' }}
                                                 />
-                                                <Line 
-                                                    type="monotone" 
+                                                <Bar 
                                                     dataKey="ingresos" 
                                                     name="Ingresos" 
-                                                    stroke="#22c55e" 
-                                                    strokeWidth={3} 
-                                                    dot={{ r: 4, strokeWidth: 2, fill: '#fff' }} 
-                                                    activeDot={{ r: 6, strokeWidth: 0 }}
+                                                    fill="#22c55e" 
+                                                    radius={[4, 4, 0, 0]}
+                                                    barSize={30}
                                                 />
-                                                <Line 
-                                                    type="monotone" 
+                                                <Bar 
                                                     dataKey="bajas" 
                                                     name="Bajas" 
-                                                    stroke="#ef4444" 
-                                                    strokeWidth={3} 
-                                                    dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
-                                                    activeDot={{ r: 6, strokeWidth: 0 }}
+                                                    fill="#ef4444" 
+                                                    radius={[4, 4, 0, 0]}
+                                                    barSize={30}
                                                 />
-                                            </LineChart>
+                                            </BarChart>
                                         </ResponsiveContainer>
                                     </div>
                                 </div>
 
                                 {/* Distribución de Asistencia */}
-                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                                     <h3 className="font-bold text-slate-700 mb-6">Salud de Asistencia</h3>
                                     <div className="h-64 flex items-center justify-center">
                                         <ResponsiveContainer width="100%" height="100%">
@@ -501,6 +596,40 @@ export default function MonthlyReportModal({ isOpen, onClose }) {
                                                 <Legend />
                                             </PieChart>
                                         </ResponsiveContainer>
+                                    </div>
+                                </div>
+
+                                {/* Motivos de Bajas */}
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <h3 className="font-bold text-slate-700 mb-6">Motivos de Bajas</h3>
+                                    <div className="h-64">
+                                        {terminationChartData.length > 0 ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart 
+                                                    data={terminationChartData} 
+                                                    layout="vertical"
+                                                    margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                                                >
+                                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                                    <XAxis type="number" hide />
+                                                    <YAxis 
+                                                        dataKey="name" 
+                                                        type="category" 
+                                                        width={120} 
+                                                        tick={{fontSize: 11}} 
+                                                        interval={0}
+                                                    />
+                                                    <Tooltip cursor={{fill: 'transparent'}} />
+                                                    <Legend />
+                                                    <Bar dataKey="Forzado" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={20} name="Forzado" />
+                                                    <Bar dataKey="NoForzado" stackId="a" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={20} name="No Forzado" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+                                                No hay bajas registradas en este periodo
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
