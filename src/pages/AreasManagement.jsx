@@ -8,9 +8,13 @@ import {
   Briefcase, 
   Building2, 
   Search,
-  LayoutGrid
+  LayoutGrid,
+  ArrowRightLeft,
+  Check,
+  X
 } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
+import Modal from '../components/ui/Modal'
 
 export default function AreasManagement() {
   const [positions, setPositions] = useState([])
@@ -19,6 +23,13 @@ export default function AreasManagement() {
   const [newAreaName, setNewAreaName] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const { showToast } = useToast()
+
+  // Modal States
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false)
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState(false)
+  const [selectedArea, setSelectedArea] = useState(null)
+  const [selectedPosition, setSelectedPosition] = useState(null)
+  const [positionsToAssign, setPositionsToAssign] = useState([]) // Array of IDs for bulk assign
 
   // Cargar datos iniciales
   useEffect(() => {
@@ -70,6 +81,91 @@ export default function AreasManagement() {
       setPositions(positions.map(p => p.area_id === id ? { ...p, area_id: null, area_name: 'Sin Área Asignada' } : p))
       showToast('Área eliminada', 'success')
     }
+  }
+
+  // --- MODAL HANDLERS ---
+  const openAssignModal = (area) => {
+    setSelectedArea(area)
+    setPositionsToAssign([])
+    setIsAssignModalOpen(true)
+  }
+
+  const handleBulkAssign = async () => {
+    if (!selectedArea || positionsToAssign.length === 0) return
+
+    let successCount = 0
+    let errors = []
+
+    // Optimistic Update
+    const previousPositions = [...positions]
+    setPositions(prev => prev.map(p => 
+      positionsToAssign.includes(p.id)
+        ? { ...p, area_id: selectedArea.id, area_name: selectedArea.name }
+        : p
+    ))
+    
+    setIsAssignModalOpen(false)
+
+    // Process all updates
+    await Promise.all(positionsToAssign.map(async (posId) => {
+      const { error } = await updatePositionArea(posId, selectedArea.id)
+      if (error) {
+        errors.push(posId)
+      } else {
+        successCount++
+      }
+    }))
+
+    if (errors.length > 0) {
+      // Revert failed updates
+      setPositions(prev => prev.map(p => 
+        errors.includes(p.id)
+          ? previousPositions.find(prevP => prevP.id === p.id)
+          : p
+      ))
+      showToast(`Se asignaron ${successCount} cargos. ${errors.length} fallaron.`, 'warning')
+    } else {
+      showToast(`${successCount} cargos asignados a ${selectedArea.name}`, 'success')
+    }
+    
+    setPositionsToAssign([])
+    setSelectedArea(null)
+  }
+
+  const openMoveModal = (position) => {
+    setSelectedPosition(position)
+    setIsMoveModalOpen(true)
+  }
+
+  const handleMovePosition = async (targetAreaId) => {
+    if (!selectedPosition) return
+
+    const targetArea = areas.find(a => a.id === targetAreaId)
+    const previousAreaId = selectedPosition.area_id
+    
+    // Optimistic Update
+    setPositions(prev => prev.map(p => 
+      p.id === selectedPosition.id
+        ? { ...p, area_id: targetAreaId, area_name: targetArea ? targetArea.name : 'Sin Área Asignada' }
+        : p
+    ))
+    
+    setIsMoveModalOpen(false)
+
+    const { error } = await updatePositionArea(selectedPosition.id, targetAreaId)
+    
+    if (error) {
+      // Revert
+      setPositions(prev => prev.map(p => 
+        p.id === selectedPosition.id
+          ? { ...p, area_id: previousAreaId }
+          : p
+      ))
+      showToast('Error al mover el cargo', 'error')
+    } else {
+      showToast(`Cargo movido a ${targetArea ? targetArea.name : 'Sin Área'}`, 'success')
+    }
+    setSelectedPosition(null)
   }
 
   // --- DRAG AND DROP HANDLERS ---
@@ -138,7 +234,7 @@ export default function AreasManagement() {
             Gestión de Áreas y Cargos
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Arrastra los cargos para asignarlos a sus áreas correspondientes
+            Arrastra los cargos o usa los botones <span className="inline-block bg-blue-50 text-blue-600 rounded px-1"><ArrowRightLeft size={12} className="inline"/></span> para asignarlos a sus áreas
           </p>
         </div>
         
@@ -198,13 +294,22 @@ export default function AreasManagement() {
                   key={pos.id}
                   draggable
                   onDragStart={(e) => handleDragStart(e, pos.id)}
-                  className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors group"
+                  className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors group relative"
                 >
-                  <div className="flex justify-between items-start">
+                  <div className="flex justify-between items-start pr-6">
                     <p className="font-medium text-gray-800 text-sm">{pos.name}</p>
-                    <GripVertical size={16} className="text-gray-300 group-hover:text-gray-500" />
+                    <GripVertical size={16} className="text-gray-300 group-hover:text-gray-500 absolute top-3 right-2" />
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">{pos.employee_count} empleados</p>
+                  <div className="flex justify-between items-center mt-2">
+                    <p className="text-xs text-gray-500">{pos.employee_count} empleados</p>
+                    <button 
+                      onClick={() => openMoveModal(pos)}
+                      className="text-blue-500 hover:text-blue-700 p-1 rounded hover:bg-blue-50 transition-colors"
+                      title="Mover a otra área"
+                    >
+                      <ArrowRightLeft size={14} />
+                    </button>
+                  </div>
                 </div>
               ))}
               {unassignedPositions.length === 0 && (
@@ -234,13 +339,22 @@ export default function AreasManagement() {
                       {areaPositions.length}
                     </span>
                   </h3>
-                  <button 
-                    onClick={() => handleDeleteArea(area.id)}
-                    className="text-red-400 hover:text-red-600 opacity-0 group-hover/header:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded"
-                    title="Eliminar Área"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex gap-1 opacity-0 group-hover/header:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => openAssignModal(area)}
+                      className="text-blue-500 hover:text-blue-700 p-1 hover:bg-blue-100 rounded"
+                      title="Agregar cargos"
+                    >
+                      <Plus size={16} />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteArea(area.id)}
+                      className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded"
+                      title="Eliminar Área"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/30">
@@ -249,13 +363,22 @@ export default function AreasManagement() {
                       key={pos.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, pos.id)}
-                      className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors group"
+                      className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors group relative"
                     >
-                      <div className="flex justify-between items-start">
+                      <div className="flex justify-between items-start pr-6">
                         <p className="font-medium text-gray-800 text-sm">{pos.name}</p>
-                        <GripVertical size={16} className="text-gray-300 group-hover:text-gray-500" />
+                        <GripVertical size={16} className="text-gray-300 group-hover:text-gray-500 absolute top-3 right-2" />
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">{pos.employee_count} empleados</p>
+                      <div className="flex justify-between items-center mt-2">
+                        <p className="text-xs text-gray-500">{pos.employee_count} empleados</p>
+                        <button 
+                          onClick={() => openMoveModal(pos)}
+                          className="text-blue-500 hover:text-blue-700 p-1 rounded hover:bg-blue-50 transition-colors"
+                          title="Mover a otra área"
+                        >
+                          <ArrowRightLeft size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {areaPositions.length === 0 && (
@@ -270,6 +393,127 @@ export default function AreasManagement() {
 
         </div>
       </div>
+      {/* --- MODAL DE ASIGNACIÓN MASIVA --- */}
+      <Modal
+        isOpen={isAssignModalOpen}
+        onClose={() => setIsAssignModalOpen(false)}
+        title={`Asignar cargos a ${selectedArea?.name}`}
+        confirmText={`Asignar (${positionsToAssign.length})`}
+        onConfirm={handleBulkAssign}
+        showCancel
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Selecciona los cargos que deseas mover a este área. 
+            Se muestran cargos de "Sin Asignar" y de otras áreas.
+          </p>
+          
+          <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {positions
+              .filter(p => p.area_id !== selectedArea?.id)
+              .sort((a, b) => {
+                // Prioritize unassigned
+                if (!a.area_id && b.area_id) return -1
+                if (a.area_id && !b.area_id) return 1
+                return a.name.localeCompare(b.name)
+              })
+              .map(pos => (
+                <label 
+                  key={pos.id} 
+                  className={`flex items-center justify-between p-3 hover:bg-gray-50 cursor-pointer transition-colors ${positionsToAssign.includes(pos.id) ? 'bg-blue-50' : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      checked={positionsToAssign.includes(pos.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setPositionsToAssign([...positionsToAssign, pos.id])
+                        } else {
+                          setPositionsToAssign(positionsToAssign.filter(id => id !== pos.id))
+                        }
+                      }}
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{pos.name}</p>
+                      <p className="text-xs text-gray-400">
+                        {pos.area_name || 'Sin Asignar'} • {pos.employee_count} emp.
+                      </p>
+                    </div>
+                  </div>
+                </label>
+              ))
+            }
+            {positions.filter(p => p.area_id !== selectedArea?.id).length === 0 && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                No hay cargos disponibles para asignar.
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* --- MODAL DE MOVIMIENTO INDIVIDUAL --- */}
+      <Modal
+        isOpen={isMoveModalOpen}
+        onClose={() => setIsMoveModalOpen(false)}
+        title={`Mover cargo: ${selectedPosition?.name}`}
+        showCancel={false}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Selecciona el área de destino para este cargo.
+          </p>
+          
+          <div className="grid grid-cols-1 gap-2 max-h-[60vh] overflow-y-auto">
+            {/* Opción Sin Asignar */}
+            <button
+              onClick={() => handleMovePosition(null)}
+              className={`w-full text-left p-3 rounded-lg border transition-all flex items-center gap-3
+                ${!selectedPosition?.area_id 
+                  ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' 
+                  : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                }`}
+            >
+              <div className="p-2 bg-gray-100 rounded-full text-gray-500">
+                <Briefcase size={18} />
+              </div>
+              <div>
+                <p className="font-medium text-gray-800">Sin Asignar</p>
+                <p className="text-xs text-gray-500">Mover a la lista de pendientes</p>
+              </div>
+              {!selectedPosition?.area_id && <Check size={18} className="ml-auto text-blue-600" />}
+            </button>
+
+            {/* Lista de Áreas */}
+            {areas.map(area => (
+              <button
+                key={area.id}
+                onClick={() => handleMovePosition(area.id)}
+                disabled={selectedPosition?.area_id === area.id}
+                className={`w-full text-left p-3 rounded-lg border transition-all flex items-center gap-3
+                  ${selectedPosition?.area_id === area.id 
+                    ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500 opacity-60 cursor-default' 
+                    : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                  }`}
+              >
+                <div className="p-2 bg-blue-50 rounded-full text-blue-600">
+                  <Building2 size={18} />
+                </div>
+                <div>
+                  <p className="font-medium text-gray-800">{area.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {positions.filter(p => p.area_id === area.id).length} cargos asignados
+                  </p>
+                </div>
+                {selectedPosition?.area_id === area.id && <Check size={18} className="ml-auto text-blue-600" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Modal>
+
     </div>
   )
 }

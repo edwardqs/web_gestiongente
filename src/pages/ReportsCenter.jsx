@@ -12,7 +12,8 @@ import {
     Filter,
     Table,
     ChevronDown,
-    UserMinus // Icono para bajas
+    UserMinus, // Icono para bajas
+    X // Icono para limpiar filtros
 } from 'lucide-react'
 import { 
     getEmployeesReport, 
@@ -21,6 +22,8 @@ import {
     getVacationBalanceReport,
     getTerminationsReport
 } from '../services/reports'
+import { getAreas } from '../services/areas'
+import { getBusinessUnits } from '../services/organization'
 
 export default function ReportsCenter() {
     const { user } = useAuth()
@@ -31,6 +34,19 @@ export default function ReportsCenter() {
     // Filtros Generales
     const [selectedSede, setSelectedSede] = useState(user?.sede || 'all')
     const [selectedBusinessUnit, setSelectedBusinessUnit] = useState(user?.business_unit || 'all')
+    const [selectedArea, setSelectedArea] = useState('all')
+    const [areas, setAreas] = useState([])
+    const [businessUnits, setBusinessUnits] = useState([])
+
+    // Cargar Áreas y Unidades de Negocio
+    React.useEffect(() => {
+        getAreas().then(({ data }) => {
+            if (data) setAreas(data)
+        })
+        getBusinessUnits().then(({ data }) => {
+            if (data) setBusinessUnits(data)
+        })
+    }, [])
     
     // Helper robusto para fecha Perú UTC-5 (independiente del navegador)
     const getPeruDate = () => {
@@ -62,8 +78,9 @@ export default function ReportsCenter() {
     })
 
     // ── FILTRADO DE SEGURIDAD ──
-    const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
+    const normalize = (str) => str ? str.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() : "";
     const userPosition = normalize(user?.position);
+    const userRole = normalize(user?.role);
 
     const isGlobalAdmin = 
         user?.role === 'ADMIN' || 
@@ -77,6 +94,31 @@ export default function ReportsCenter() {
 
     const canSelectSede = isGlobalAdmin && !user?.sede
 
+    const canViewFilters = isGlobalAdmin || userRole.includes('JEFE DE GENTE Y GESTION') || userRole === 'GERENTE';
+
+    // ── SOBREESCRIBIR PERMISOS PARA JEFE DE GENTE Y GESTIÓN ──
+    // Si es Jefe de Gente y Gestión, puede filtrar todo sin restricciones (como un admin para reportes)
+    const isJefeGyG = userRole.includes('JEFE DE GENTE Y GESTION') || userPosition.includes('JEFE DE GENTE Y GESTION');
+    
+    // Si es Jefe GyG, anulamos la restricción de sede y unidad de negocio que viene del user profile
+    const effectiveSede = isJefeGyG ? (selectedSede === 'all' ? null : selectedSede) : (user?.sede || selectedSede === 'all' ? null : selectedSede);
+    const effectiveBusinessUnit = isJefeGyG ? (selectedBusinessUnit === 'all' ? null : selectedBusinessUnit) : (user?.business_unit || selectedBusinessUnit === 'all' ? null : selectedBusinessUnit);
+
+    // Permitir selección de sede si es Admin O Jefe GyG
+    const canSelectSedeFinal = canSelectSede || isJefeGyG;
+
+    // Función para limpiar filtros
+    const handleClearFilters = () => {
+        if (canSelectSedeFinal) {
+            setSelectedSede('all');
+        } else {
+            // Si no puede seleccionar sede, la reseteamos a su sede por defecto si por error cambió
+            setSelectedSede(user?.sede || 'all');
+        }
+        setSelectedBusinessUnit('all');
+        setSelectedArea('all');
+    }
+
     const handleExport = async (type) => {
         setLoading(true)
         try {
@@ -85,20 +127,58 @@ export default function ReportsCenter() {
             let sheetName = ''
             
             // Determinar sufijo de sede para el nombre del archivo
-            const sedeSuffix = (selectedSede === 'all' || !selectedSede) ? 'GENERAL' : selectedSede.toUpperCase().replace(/\s+/g, '_')
+            // Usamos selectedSede que es el estado del filtro visual
+            const currentSedeFilter = selectedSede === 'all' ? null : selectedSede;
+            const sedeSuffix = (!currentSedeFilter) ? 'GENERAL' : currentSedeFilter.toUpperCase().replace(/\s+/g, '_')
+
+            // Helper para filtrar en memoria por Unidad de Negocio y Área
+            // Normalizamos ambos lados para evitar errores por mayúsculas/tildes/espacios
+            const filterInMemory = (list) => {
+                if (!list) return []
+                return list.filter(item => {
+                    // 1. Filtro Business Unit
+                    if (selectedBusinessUnit !== 'all') {
+                        const itemBU = normalize(item.business_unit || '')
+                        const filterBU = normalize(selectedBusinessUnit)
+                        if (itemBU !== filterBU) return false
+                    }
+
+                    // 2. Filtro Area
+                    if (selectedArea !== 'all') {
+                        // Manejar si area_name es objeto (employees) o string (otros)
+                        let itemArea = ''
+                        if (item.area_name && typeof item.area_name === 'object') {
+                            itemArea = item.area_name.area_name || ''
+                        } else {
+                            itemArea = item.area_name || ''
+                        }
+                        
+                        const iArea = normalize(itemArea)
+                        const fArea = normalize(selectedArea)
+                        
+                        if (iArea !== fArea) return false
+                    }
+                    return true
+                })
+            }
 
             switch (type) {
                 case 'employees':
+                    // TRAEMOS TODO DE LA SEDE (businessUnit = null) Y FILTRAMOS EN MEMORIA
+                    // Esto corrige el problema de que el backend sea muy estricto o case-sensitive
                     const { data: empData, error: empError } = await getEmployeesReport(
-                        selectedSede === 'all' ? null : selectedSede, 
-                        selectedBusinessUnit === 'all' ? null : selectedBusinessUnit
+                        isJefeGyG ? (selectedSede === 'all' ? null : selectedSede) : (selectedSede === 'all' ? null : selectedSede), 
+                        null // selectedBusinessUnit -> NULL para traer todo y filtrar localmente
                     )
                     
                     if (empError || !empData) {
                         throw new Error('No se pudieron cargar los datos de empleados')
                     }
 
-                    data = empData.map(emp => ({
+                    // Aplicar filtros robustos en memoria
+                    const filteredEmployees = filterInMemory(empData);
+
+                    data = filteredEmployees.map(emp => ({
                         'DNI': emp.dni,
                         'Nombre Completo': emp.full_name,
                         'Cargo': emp.position,
@@ -136,6 +216,8 @@ export default function ReportsCenter() {
                     const queryEndStr = qEnd.toISOString().split('T')[0];
 
                     // Obtener datos con rango ampliado
+                    // Usamos el estado selectedSede directamente, confiando en que la UI ya restringió si era necesario
+                    // Para Jefe GyG, selectedSede es libre.
                     const { data: rawAttData, error: attError } = await getAttendanceReport(
                         queryStartStr,
                         queryEndStr,
@@ -147,19 +229,23 @@ export default function ReportsCenter() {
                     }
 
                     // FILTRADO EXACTO EN MEMORIA (String vs String)
-                    const attData = rawAttData.filter(item => {
+                    let attData = rawAttData.filter(item => {
                         return item.work_date >= dateRange.start && item.work_date <= dateRange.end;
                     });
 
                     // 2. Obtener lista de empleados para el cruce (Roster)
+                    // TRAEMOS TODO DE LA SEDE (businessUnit = null) Y FILTRAMOS EN MEMORIA
                     const { data: allEmployees, error: empError2 } = await getEmployeesReport(
                         selectedSede === 'all' ? null : selectedSede, 
-                        selectedBusinessUnit === 'all' ? null : selectedBusinessUnit
+                        null
                     )
 
                     if (empError2 || !allEmployees) {
                         throw new Error('No se pudo cargar la lista de empleados para el reporte')
                     }
+
+                    // Filtrar Roster por BU y Área usando el helper robusto
+                    const rosterEmployees = filterInMemory(allEmployees);
 
                     // 3. Generar rango de fechas (Iteración segura usando UTC)
                     const dates = []
@@ -194,7 +280,7 @@ export default function ReportsCenter() {
                     dates.sort((a, b) => b - a).forEach(d => {
                         const dateStr = d.toISOString().split('T')[0]
                         
-                        allEmployees.forEach(emp => {
+                        rosterEmployees.forEach(emp => {
                             // Buscar si existe registro
                             const record = attendanceMap[dateStr]?.[emp.id]
                             
@@ -277,18 +363,22 @@ export default function ReportsCenter() {
                     const tStart = `${terminationsRange.start}T00:00:00`
                     const tEnd = `${terminationsRange.end}T23:59:59`
                     
+                    // TRAEMOS TODO DE LA SEDE (businessUnit = null) Y FILTRAMOS EN MEMORIA
                     const { data: termData, error: termError } = await getTerminationsReport(
                         tStart,
                         tEnd,
                         selectedSede === 'all' ? null : selectedSede,
-                        selectedBusinessUnit === 'all' ? null : selectedBusinessUnit
+                        null // selectedBusinessUnit -> NULL
                     )
                     
                     if (termError || !termData) {
                         throw new Error('No se pudieron cargar los datos de bajas')
                     }
                     
-                    data = termData.map(t => ({
+                    // Filtrar por BU y Área en memoria usando helper robusto
+                    const filteredTerms = filterInMemory(termData);
+
+                    data = filteredTerms.map(t => ({
                         'DNI': t.dni,
                         'Nombre Completo': t.full_name,
                         'Cargo': t.position,
@@ -313,10 +403,15 @@ export default function ReportsCenter() {
                         selectedMonth.month,
                         selectedSede === 'all' ? null : selectedSede
                     )
-                    data = hiresData.map(h => ({
+
+                    // Filtrar por BU y Área en memoria usando helper robusto
+                    const filteredHires = filterInMemory(hiresData);
+                    
+                    data = filteredHires.map(h => ({
                         'DNI': h.dni,
                         'Nombre Completo': h.full_name,
                         'Cargo': h.position,
+                        'Área': h.area_name || '-',
                         'Sede': h.sede,
                         'Unidad Negocio': h.business_unit || '-',
                         'Fecha Ingreso': h.entry_date
@@ -329,7 +424,11 @@ export default function ReportsCenter() {
                     const { data: vacData } = await getVacationBalanceReport(
                         selectedSede === 'all' ? null : selectedSede
                     )
-                    data = vacData.map(v => {
+                    
+                    // Filtrar por BU y Área en memoria usando helper robusto
+                    const filteredVac = filterInMemory(vacData);
+
+                    data = filteredVac.map(v => {
                         // Calcular años de servicio automáticamente
                         let yearsService = v.years_service;
                         if (v.entry_date) {
@@ -346,6 +445,8 @@ export default function ReportsCenter() {
                         return {
                             'DNI': v.dni,
                             'Empleado': v.full_name,
+                            'Cargo': v.position,
+                            'Área': v.area_name || '-',
                             'Sede': v.sede,
                             'Unidad Negocio': v.business_unit || '-',
                             'Fecha Ingreso': v.entry_date,
@@ -353,7 +454,13 @@ export default function ReportsCenter() {
                             'Días Ganados': Math.trunc(v.earned_days || 0),
                             'Días Gozados': Math.trunc(parseFloat(v.legacy_taken || 0) + parseFloat(v.app_taken || 0)),
                             'Saldo Actual': Math.trunc(v.balance || 0),
-                            'Estado': v.status
+                            'Estado': (() => {
+                                const s = (v.status || '').toLowerCase();
+                                if (s === 'danger') return 'CRÍTICO';
+                                if (s === 'warning') return 'ADVERTENCIA';
+                                if (s === 'safe' || s === 'success') return 'NORMAL';
+                                return (v.status || '-').toUpperCase();
+                            })()
                         }
                     })
                     fileName = `Saldos_Vacaciones_${sedeSuffix}_${getPeruDate()}.xlsx`
@@ -401,27 +508,75 @@ export default function ReportsCenter() {
                 </div>
             </div>
 
-            {/* Selector de Sede Global (Si aplica) */}
-            {canSelectSede && (
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-center gap-4">
-                    <Filter className="text-gray-400" />
-                    <span className="text-sm font-medium text-gray-700">Filtrar por Sede:</span>
-                    <select
-                        value={selectedSede}
-                        onChange={(e) => setSelectedSede(e.target.value)}
-                        className="border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+            {/* Selector de Filtros Avanzados */}
+            {canViewFilters && (
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <Filter className="text-gray-400" />
+                        <span className="text-sm font-medium text-gray-700">Filtros:</span>
+                    </div>
+                    
+                    {/* Sede */}
+                    <div className="flex flex-col">
+                        <label className="text-xs text-gray-500 mb-1">Sede</label>
+                        <select
+                            value={selectedSede}
+                            onChange={(e) => setSelectedSede(e.target.value)}
+                            disabled={!canSelectSedeFinal}
+                            className={`border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[140px] ${!canSelectSedeFinal ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
+                        >
+                            <option value="all">Todas las Sedes</option>
+                            <option value="ADM. CENTRAL">ADM. CENTRAL</option>
+                            <option value="LIMA">Lima</option>
+                            <option value="TRUJILLO">Trujillo</option>
+                            <option value="CHIMBOTE">Chimbote</option>
+                            <option value="HUARAZ">Huaraz</option>
+                            <option value="HUACHO">Huacho</option>
+                            <option value="CHINCHA">Chincha</option>
+                            <option value="ICA">Ica</option>
+                            <option value="DESAGUADERO">Desaguadero</option>
+                        </select>
+                    </div>
+
+                    {/* Business Unit */}
+                    <div className="flex flex-col">
+                        <label className="text-xs text-gray-500 mb-1">Unidad de Negocio</label>
+                        <select
+                            value={selectedBusinessUnit}
+                            onChange={(e) => setSelectedBusinessUnit(e.target.value)}
+                            className="border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[160px]"
+                        >
+                            <option value="all">Todas</option>
+                            {businessUnits.map(bu => (
+                                <option key={bu.id} value={bu.name}>{bu.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Area */}
+                    <div className="flex flex-col">
+                        <label className="text-xs text-gray-500 mb-1">Área</label>
+                        <select
+                            value={selectedArea}
+                            onChange={(e) => setSelectedArea(e.target.value)}
+                            className="border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500 min-w-[200px] max-w-[250px]"
+                        >
+                            <option value="all">Todas</option>
+                            {areas.map(area => (
+                                <option key={area.id} value={area.name}>{area.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Botón Limpiar Filtros */}
+                    <button
+                        onClick={handleClearFilters}
+                        className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors ml-auto md:ml-0"
+                        title="Limpiar todos los filtros"
                     >
-                        <option value="all">Todas las Sedes</option>
-                        <option value="ADM. CENTRAL">ADM. CENTRAL</option>
-                        <option value="LIMA">Lima</option>
-                        <option value="TRUJILLO">Trujillo</option>
-                        <option value="CHIMBOTE">Chimbote</option>
-                        <option value="HUARAZ">Huaraz</option>
-                        <option value="HUACHO">Huacho</option>
-                        <option value="CHINCHA">Chincha</option>
-                        <option value="ICA">Ica</option>
-                        <option value="DESAGUADERO">Desaguadero</option>
-                    </select>
+                        <X size={16} />
+                        Limpiar
+                    </button>
                 </div>
             )}
 

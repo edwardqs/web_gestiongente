@@ -112,8 +112,28 @@ export const getNewHiresReport = async (year, month, sede = null) => {
 
         if (error) throw error
         
-        // Extraer solo la lista de nuevos ingresos
-        return { data: data?.new_hires?.list || [], error: null }
+        const hiresList = data?.new_hires?.list || []
+
+        // Enriquecer con Área (JobPosition -> Area)
+        const { data: positions } = await supabase
+            .from('job_positions')
+            .select('name, areas(name)')
+        
+        const positionAreaMap = {}
+        if (positions) {
+            positions.forEach(pos => {
+                if (pos.name) {
+                    positionAreaMap[pos.name] = pos.areas?.name || 'Sin Área'
+                }
+            })
+        }
+
+        const enrichedData = hiresList.map(h => ({
+            ...h,
+            area_name: positionAreaMap[h.position] || 'Sin Área'
+        }))
+
+        return { data: enrichedData, error: null }
     } catch (error) {
         console.error('Error fetching new hires report:', error)
         return { data: null, error }
@@ -134,7 +154,27 @@ export const getVacationBalanceReport = async (sede = null) => {
         const { data, error } = await query
 
         if (error) throw error
-        return { data, error: null }
+
+        // Enriquecer con Área (JobPosition -> Area)
+        const { data: positions } = await supabase
+            .from('job_positions')
+            .select('name, areas(name)')
+        
+        const positionAreaMap = {}
+        if (positions) {
+            positions.forEach(pos => {
+                if (pos.name) {
+                    positionAreaMap[pos.name] = pos.areas?.name || 'Sin Área'
+                }
+            })
+        }
+
+        const enrichedData = data.map(v => ({
+            ...v,
+            area_name: positionAreaMap[v.position] || 'Sin Área'
+        }))
+
+        return { data: enrichedData, error: null }
     } catch (error) {
         console.error('Error fetching vacation balance report:', error)
         return { data: null, error }

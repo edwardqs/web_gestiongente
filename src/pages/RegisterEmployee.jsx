@@ -329,15 +329,17 @@ export default function RegisterEmployee() {
       if (isEditing) {
         await updateEmployee(id, dataToSave)
         setSuccess(true)
+        // Redirigir después de 1 segundo para dar feedback visual
+        setTimeout(() => {
+            navigate(-1)
+        }, 1000)
       } else {
         await createEmployee(dataToSave)
         setSuccess(true)
-        // Reset form (opcional)
-        setFormData({
-            ...formData,
-            dni: '', full_name: '', phone: '', email: '', 
-            position: '', job_position_id: null, role_id: null
-        })
+        // Redirigir después de 1 segundo
+        setTimeout(() => {
+            navigate(-1)
+        }, 1000)
       }
     } catch (err) {
       console.error(err)

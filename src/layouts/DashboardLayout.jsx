@@ -13,7 +13,8 @@ export default function DashboardLayout({ children }) {
   const isFullWidthPage = 
     location.pathname === '/vacaciones' || 
     location.pathname === '/attendance-list' || 
-    location.pathname.startsWith('/employees')
+    location.pathname.startsWith('/employees') ||
+    location.pathname === '/areas'
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
